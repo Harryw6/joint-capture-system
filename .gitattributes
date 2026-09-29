@@ -1,0 +1,7 @@
+* -text
+*.zip binary
+*.so binary
+*.a binary
+*.stl binary
+*.STL binary
+*.dae binary

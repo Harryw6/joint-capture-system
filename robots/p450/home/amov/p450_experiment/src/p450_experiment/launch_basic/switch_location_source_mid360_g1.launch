@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="prometheus_communication_bridge" type="switch_location_source" name="switch_location_source" output="screen">
+        <rosparam command="load" file="$(find p450_experiment)/config/prometheus_communication_config/mid360_g1_location_source.yaml" />
+    </node>
+</launch>

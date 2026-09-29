@@ -1,0 +1,35 @@
+common:
+    lid_topic:  "/livox/lidar"   #雷达话题
+    imu_topic:  "/uav1/mavros/imu/data"     #IMU数据话题/uav1/mavros/imu/data_raw,/livox/imu
+    time_sync_en: false         # 是否启用外部时间同步
+    time_offset_lidar_to_imu: 0.0 # LiDAR和IMU之间的时间偏移,这个值如果已经标定过，您可以设置为非零值。如果不清楚时间偏移，则可以保持为0
+                             
+preprocess:
+    lidar_type: 1               #点云数据类型 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
+    scan_line: 4                #LiDAR扫描线数
+    blind: 0.5                  #盲区的最大距离（单位：米）。超出该范围的数据将不被处理。
+
+mapping:
+    acc_cov: 0.1                #加速度计的协方差。用于IMU的噪声建模，值越大表示加速度计噪声越大
+    gyr_cov: 0.1                #陀螺仪的协方差。用于IMU的噪声建模，值越大表示陀螺仪噪声越大
+    b_acc_cov: 0.0001           #绑定加速度计的协方差（可能用于外部系统的标定）。
+    b_gyr_cov: 0.0001           #绑定陀螺仪的协方差
+    
+    fov_degree:    360          #LiDAR的视场角（单位：度）。
+    det_range:     100.0        #LiDAR的检测范围，单位为米
+    extrinsic_est_en:  false    # 是否启用IMU与LiDAR之间的外参估计。
+    extrinsic_T: [ -0.011, -0.02329, 0.04412 ]   #IMU与LiDAR之间的平移向量（单位：米）。
+    extrinsic_R: [ 1, 0, 0,     #从LiDAR坐标系到IMU坐标系的变换。
+                   0, 1, 0,
+                   0, 0, 1]
+
+publish:
+    path_en:  false              #是否启用路径的发布
+    scan_publish_en:  true       # 是否发布扫描数据
+    dense_publish_en: true       # 是否发布密集的点云数据
+    scan_bodyframe_pub_en: true  # 是否在IMU的体坐标系下发布扫描数据
+pcd_save:
+    pcd_save_en: false           # 是否启用PCD文件保存
+    interval: -1                 # 保存PCD文件的间隔
+                                 # -1表示将所有数据保存到一个PCD文件中，如果数据量非常大，这可能会导致内存问题。
+

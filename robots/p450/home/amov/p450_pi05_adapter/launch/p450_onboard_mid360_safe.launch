@@ -1,0 +1,42 @@
+<launch>
+  <!-- Official entity stack: the mid360+d435i branch of
+       p450_experiment/scripts/p450_onboard.sh (control + mavros + livox +
+       fastlio + location-source switch), minus D435i camera and video
+       streaming which the adapter does not need. Launch only when the
+       official stack is not already running: node names collide otherwise. -->
+  <include file="$(find p450_experiment)/launch_basic/p450_onboard_mid360.launch">
+    <arg name="uav_id" value="1" />
+    <arg name="sim_mode" value="false" />
+    <arg name="control/enable_external_control" value="false" />
+  </include>
+  <include file="$(find p450_experiment)/launch_mid360/msg_MID360.launch" />
+  <include file="$(find p450_experiment)/launch_mid360/mapping_mid360.launch">
+    <arg name="rviz" value="false" />
+  </include>
+  <include file="$(find p450_experiment)/launch_basic/switch_location_source_mid360_d435i.launch" />
+
+  <param name="/uav_control_main_1/control/Takeoff_height" value="0.25" />
+  <param name="/uav_control_main_1/control/Land_speed" value="0.05" />
+
+  <!-- uav_controller.cpp uses these as command-side PX4 limits. -->
+  <param name="/uav_control_main_1/control/COMMAND_MPC_XY_VEL_MAX" value="0.30" />
+  <param name="/uav_control_main_1/control/COMMAND_MPC_ACC_HOR" value="2.00" />
+
+  <!--
+    Estimator failure thresholds, not command caps.
+    Candidate values require readback and tuning during the future propeller-off phase.
+    uav_estimator.cpp uses these four values against odometry noise and firmware limits.
+  -->
+  <param name="/uav_control_main_1/control/maximum_safe_vel_xy" value="0.60" />
+  <param name="/uav_control_main_1/control/maximum_safe_vel_z" value="0.40" />
+  <param name="/uav_control_main_1/control/maximum_vel_error_for_vision" value="0.30" />
+  <param name="/uav_control_main_1/control/maximum_vel_error_for_Odom" value="0.15" />
+
+  <param name="/uav_control_main_1/enable_px4_params_load" value="false" />
+  <param name="/uav_control_main_1/geo_fence/x_min" value="-0.50" />
+  <param name="/uav_control_main_1/geo_fence/x_max" value="0.50" />
+  <param name="/uav_control_main_1/geo_fence/y_min" value="-0.50" />
+  <param name="/uav_control_main_1/geo_fence/y_max" value="0.50" />
+  <param name="/uav_control_main_1/geo_fence/z_min" value="-0.10" />
+  <param name="/uav_control_main_1/geo_fence/z_max" value="0.30" />
+</launch>

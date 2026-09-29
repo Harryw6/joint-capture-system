@@ -1,0 +1,16 @@
+<launch>
+    <node pkg="p450_mission" type="gimbal_yolov5_tracking" name="gimbal_yolov5_tracking" output="screen">
+		<param name="uav_id" value="1" />
+		<!-- 根据百分比面积变换调整，前进速度 -->
+            	<param name="kp_x" type="double" value="0.5" />
+            	<!-- 根据pitch误差调整高度 -->
+            	<param name="kp_z" type="double" value="0.1" />
+            	<!-- 更具yaw误差调整无人机航向角 -->
+            	<param name="kp_gimbal" type="double" value="0.5" />
+            	<!-- 最大X轴速度 -->
+            	<param name="max_velocity" type="double" value="0.5" />
+            	<!-- 最大航向角速率（角度） -->
+            	<param name="max_yaw_rate" type="double" value="50" />
+	</node>
+</launch>
+

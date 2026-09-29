@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Exec=/home/amov/p450_experiment/src/p450_experiment/sh_for_p450/p450_communication.sh
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=false
+Name[en_US]=p450_mid360_g1
+Name=p450_communication
+Comment[en_US]=
+Comment=

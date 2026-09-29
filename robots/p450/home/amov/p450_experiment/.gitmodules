@@ -1,0 +1,18 @@
+[submodule "src/Prometheus"]
+	path = src/Prometheus
+	url = https://gitee.com/amovlab1/Prometheus.git
+[submodule "src/bluesea2"]
+	path = src/bluesea2
+	url = https://gitee.com/amovlab1/bluesea2.git
+[submodule "src/realsense-ros"]
+	path = src/realsense-ros
+	url = https://gitee.com/amovlab1/realsense-ros.git
+[submodule "src/rplidar_ros"]
+	path = src/rplidar_ros
+	url = https://gitee.com/amovlab1/rplidar_ros.git
+[submodule "src/spirecv-ros"]
+	path = src/spirecv-ros
+	url = https://gitee.com/amovlab1/spirecv-ros.git
+[submodule "src/livox_ros_driver2"]
+	path = src/livox_ros_driver2
+	url = https://gitee.com/amovlab1/livox_ros_driver2.git

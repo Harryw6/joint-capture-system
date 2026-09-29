@@ -1,0 +1,10 @@
+<launch>
+    <param name="algorithm_parameters" type="string" value="/home/amov/SpireCV/confs/sv_algorithm_params_coco_1280.json" />
+    <node pkg="spirecv_ros" type="gimbal_detection_with_tracking" name="gimbal_detection_with_tracking" output="screen">
+        <param name="uav_id" type="int" value="1" />
+        <param name="camera_parameters" type="string" value="$(find p450_experiment)/config/spirecv_config/calib_g1_720.yaml" />
+        <param name="local_saving_path" type="string" value="$(find spirecv_ros)" />
+        <param name="input_image_topic" type="string" value="/uav1/gimbal/image_original" />
+	 <param name="output_image_topic" type="string" value="/uav1/spirecv/image_det" />
+    </node>
+</launch>

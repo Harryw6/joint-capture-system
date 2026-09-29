@@ -1,0 +1,31 @@
+<launch>
+    <node pkg="p450_mission" type="gimbal_aruco_landing" name="gimbal_aruco_landing" output="screen">
+		<param name="uav_id" value="1" />
+		<!-- 根据百分比面积变换调整，前进速度 -->
+            	<param name="kp_x" type="double" value="0.3" />
+            	<!-- 根据pitch误差调整高度 -->
+            	<param name="kp_z" type="double" value="0.5" />
+            	<!-- 更具yaw误差调整无人机航向角 -->
+            	<param name="kp_gimbal" type="double" value="1.0" />
+            	<!-- 最大X轴速度 -->
+            	<param name="max_velocity" type="double" value="1.0" />
+            	<!-- 最大航向角速率（角度） -->
+            	<param name="max_yaw_rate" type="double" value="40" />
+            	<!-- 吊舱pitch角度误差 -->
+            	<param name="ignore_error_pitch" type="double" value="3.0" />
+            	<!-- 降落高度 -->
+            	<param name="land_height" type="double" value="0.3" />
+            	<!-- 最长丢失时间 -->
+            	<param name="max_lost_time" type="double" value="1000.0" />
+            	<!-- 最短丢失时间 -->
+            	<param name="min_lost_time" type="double" value="1000.0" />	
+            	<!-- 静止速度 -->
+            	<param name="static_vel_thresh" type="double" value="0.03" />
+            	<!-- 吊舱相对地面静止高度的偏移量 -->
+            	<param name="gimbal_offset" type="double" value="-0.05" />
+				<!-- 吊舱yaw角度误差 -->
+            	<param name="ignore_error_yaw" type="double" value="30" />
+            	<!-- 距离降落目标平面距离的阈值,不再控制无人机的yaw -->
+            	<param name="threshold_distance" type="double" value="0.30" />
+	</node>
+</launch>

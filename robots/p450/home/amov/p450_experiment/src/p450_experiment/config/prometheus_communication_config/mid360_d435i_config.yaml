@@ -1,0 +1,57 @@
+## 脚本启动参数
+load_functional_script:
+  btn1:
+    name: "MID360建图(MID360定位下无需启动)"
+    cmd: "/home/amov/p450_experiment/src/p450_experiment/scripts/mid360_output.sh"
+    close_cmd: "rosnode kill /fliter_points /laserMapping /livox_lidar_publisher2 /tf_MID360"
+    mode: 2
+    node_name: "/fliter_points | /laserMapping | /livox_lidar_publisher2 | /tf_MID360"  # 当mode为2时，在启动的时候会去检测是否存在该节点，不存在则启动，存在则会提示用户先关闭在启动
+    detection_cmd: ""  # 当mode为3时，在启动的时候会去运行该检测命令，存在则返回true，不存在返回false，且会提示用户先关闭在启动
+    flag: 1 # 启动位置
+  btn2:
+    name: "D435i小车点击跟踪"
+    cmd: "/home/amov/p450_experiment/src/p450_experiment/scripts/car_detection_with_tracking_d435i.sh"
+    close_cmd: "rosnode kill /car_detection_with_d435i /yolov5_tracking"
+    mode: 2
+    node_name: "/car_detection_with_d435i | /yolov5_tracking"  # 当mode为2时，在启动的时候会去检测是否存在该节点，不存在则启动，存在则会提示用户先关闭在启动
+    detection_cmd: ""  # 当mode为3时，在启动的时候会去运行该检测命令，存在则返回true，不存在返回false，且会提示用户先关闭在启动
+    flag: 1 # 启动位置
+  btn3:
+    name: "D435i二维码点击跟踪"
+    cmd: "/home/amov/p450_experiment/src/p450_experiment/scripts/aruco_detection_with_d435i.sh"
+    close_cmd: "rosnode kill /aruco_detection_with_d435i /aruco_tracking"
+    mode: 2
+    node_name: "/aruco_detection_with_d435i | /aruco_tracking"  # 当mode为2时，在启动的时候会去检测是否存在该节点，不存在则启动，存在则会提示用户先关闭在启动
+    detection_cmd: ""  # 当mode为3时，在启动的时候会去运行该检测命令，存在则返回true，不存在返回false，且会提示用户先关闭在启动
+    flag: 1 # 启动位置
+  btn4:
+    name: "D435i-EGO避障"
+    cmd: "/home/amov/p450_experiment/src/p450_experiment/scripts/d435i_ego_filter.sh"
+    close_cmd: "rosnode kill /octomap_server /radius_filter_node /uav1_ego_planner_node /uav1_traj_server_for_prometheus /rviz"
+    mode: 2
+    node_name: "/octomap_server | /radius_filter_node | /uav1_ego_planner_node | /uav1_traj_server_for_prometheus"  # 当mode为2时，在启动的时候会去检测是否存在该节点，不存在则启动，存在则会提示用户先关闭在启动
+    detection_cmd: ""  # 当mode为3时，在启动的时候会去运行该检测命令，存在则返回true，不存在返回false，且会提示用户先关闭在启动
+    flag: 1 # 启动位置
+  btn5:
+    name: "MID360-EGO避障"
+    cmd: "/home/amov/p450_experiment/src/p450_experiment/scripts/mid360_ego.sh"
+    close_cmd: "rosnode kill /octomap_server_1 /rviz1 /uav1_ego_planner_node /uav1_traj_server_for_prometheus"
+    mode: 2
+    node_name: "/uav1_ego_planner_node | /uav1_traj_server_for_prometheus"  # 当mode为2时，在启动的时候会去检测是否存在该节点，不存在则启动，存在则会提示用户先关闭在启动
+    detection_cmd: ""  # 当mode为3时，在启动的时候会去运行该检测命令，存在则返回true，不存在返回false，且会提示用户先关闭在启动
+    flag: 1 # 启动位置
+  btn6:
+    name: "Trajectory轨迹控制"
+    cmd: "roslaunch prometheus_uav_control uav_command_pub.launch"
+    close_cmd: "rosnode kill /uav_command_pub"
+    mode: 2
+    node_name: "/uav_command_pub"  # 当mode为2时，在启动的时候会去检测是否存在该节点，不存在则启动，存在则会提示用户先关闭在启动
+    detection_cmd: ""  # 当mode为3时，在启动的时候会去运行该检测命令，存在则返回true，不存在返回false，且会提示用户先关闭在启动
+    flag: 1 # 启动位置
+  btn7:
+    name: "ekf2 stop"
+    cmd: "mavlink_console:ekf2 stop"
+  btn8:
+    name: "ekf2 start"
+    cmd: "mavlink_console:ekf2 start"
+

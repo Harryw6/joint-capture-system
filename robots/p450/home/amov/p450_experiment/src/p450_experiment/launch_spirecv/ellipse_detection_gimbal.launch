@@ -1,0 +1,8 @@
+<launch>
+    <node pkg="spirecv_ros" type="ellipse_detection_gimbal" name="ellipse_detection_gimbal" output="screen">
+        <param name="uav_id" type="int" value="1" />
+        <param name="camera_parameters" type="string" value="$(find spirecv_ros)/camera_params/calib_webcam_640x480.yaml" />
+        <param name="local_saving_path" type="string" value="$(find spirecv_ros)" />
+	<param name="output_image_topic" type="string" value="/spirecv/camera/rgb/image_ellipse_det" />
+    </node>
+</launch>

@@ -1,0 +1,30 @@
+<launch>
+	<arg name="uav_id" default="1"/>
+    <arg name="sim_mode" default="false"/>
+    <arg name="flag_printf" default="true"/>
+    <!-- 如果是matlab配置为ATT_CTRL_MODE，则此处要设置为True-->
+    <arg name="control/enable_external_control" default="false"/> 
+    <arg name="launch_prefix" default="" />
+
+    <!-- 启动uav_control_main -->
+	<node pkg="prometheus_uav_control" type="uav_control_main" name="uav_control_main_$(arg uav_id)" output="screen">
+		<param name="uav_id" value="$(arg uav_id)" />
+        	<param name="sim_mode" value="$(arg sim_mode)" />
+		<param name="flag_printf" value="$(arg flag_printf)" />
+        	<param name="control/enable_external_control" value="$(arg control/enable_external_control)" />
+		<rosparam command="load" file="$(find p450_experiment)/config/prometheus_control_config/uav_control_mid360.yaml" />
+		<rosparam command="load" file="$(find p450_experiment)/config/prometheus_control_config/sensor_tf_offset_mid360.yaml" />
+	</node>
+    <group ns="/uav$(arg uav_id)">
+		<!-- 启动MAVROS -->
+		<!-- 不同机载电脑,注意修改fcu_url至正确的端口号及波特率 -->
+		<node pkg="mavros" type="mavros_node" name="mavros" output="screen">
+			<param name="fcu_url" value="/dev/ttyTHS0:921600" />
+			<param name="gcs_url" value="udp://@192.168.2.31" />
+			<param name="target_system_id" value="1" />
+			<param name="target_component_id" value="1" />
+			<rosparam command="load" file="$(find p450_experiment)/config/mavros_config/px4_pluginlists.yaml" />
+			<rosparam command="load" file="$(find p450_experiment)/config/mavros_config/px4_config_indoor.yaml" />
+		</node>
+    </group>
+</launch>

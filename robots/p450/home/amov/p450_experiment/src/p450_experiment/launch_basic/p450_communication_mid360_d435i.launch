@@ -1,0 +1,44 @@
+<launch>
+
+    <arg name="swarm_num" default="1"/>
+    <arg name="autoload" default="true"/>
+    <arg name="uav_control_start" default="gnome-terminal -- /home/amov/p450_experiment/src/p450_experiment/scripts/p450_onboard.sh"/>
+    <arg name="close_uav_control" default="gnome-terminal -- rosnode kill `rosnode list | grep -v /communication_bridge | grep -v /rosout | grep -v /rosapi | grep -v /rosbridge_websocket | grep -v /rviz_reduce_the_frequency`"/>
+    <arg name="swarm_control_start" default=""/>
+    <arg name="close_swarm_control" default=""/>
+    <arg name="ground_station_ip" default="192.168.1.123"/>
+    <arg name="uav_id" default="1"/>
+    <arg name="is_simulation" default="0"/>
+    <arg name="swarm_data_update_timeout" default="5"/>
+
+    <!-- Prometheus功能包路径 -->
+    <arg name="prometheus_moudles_url" default="/home/amov/p450_experiment/src/p450_experiment/"/>
+    
+    <!-- 单机配置文件路径 -->
+    <arg name="uav_control_yaml" default="config/uav_control_indoor.yaml"/>
+    <!-- 轨迹配置文件路径 -->
+    <arg name="uav_command_yaml" default="config/prometheus_control_config/uav_command_pub.yaml"/>
+    <include file="$(find p450_experiment)/launch_basic/bridge_mid360_d435i.launch">
+		
+        <arg name="swarm_num"                 value="$(arg swarm_num)" />
+        <arg name="autoload"                  value="$(arg autoload)" />
+		<arg name="uav_control_start"         value="$(arg uav_control_start)" />
+		<arg name="close_uav_control"         value="$(arg close_uav_control)" />
+		<arg name="swarm_control_start"       value="$(arg swarm_control_start)" />
+		<arg name="close_swarm_control"       value="$(arg close_swarm_control)" />
+        <arg name="ground_station_ip"        value="$(arg ground_station_ip)"/>
+        <arg name="uav_id"                    value="$(arg uav_id)"/>
+        <arg name="is_simulation"             value="$(arg is_simulation)"/>
+        <arg name="swarm_data_update_timeout" value="$(arg swarm_data_update_timeout)"/>
+        <arg name="uav_control_yaml"          value="$(arg uav_control_yaml)"/>
+        <arg name="uav_command_yaml"        value="$(arg uav_command_yaml)"/>
+	<arg name="prometheus_moudles_url"        value="$(arg prometheus_moudles_url)"/>
+	</include>
+
+     <node pkg="prometheus_communication_bridge" type="rviz_reduce_the_frequency" name="rviz_reduce_the_frequency" output="screen">
+        <param name="robot_type" value="1"/>
+        <param name="id" value="1"/>
+    </node>
+
+</launch>
+

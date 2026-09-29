@@ -1,0 +1,10 @@
+[Unit]
+Description=Fix camera service
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart= /bin/bash /usr/local/bin/EnableGpio_for_USB.sh
+
+[Install]
+WantedBy=multi-user.target

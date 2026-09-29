@@ -1,0 +1,10 @@
+<launch>
+    <node pkg="spirecv_ros" type="gimbal_server" name="gimbal_server" output="screen">
+        <param name="Type" type="string" value="G1" />
+        <param name="Port" type="string" value="/dev/ttyTHS1" />
+        <param name="camera" type="string" value="192.168.1.12" />
+        <param name="FPS" type="int" value="30" />
+        <param name="H" type="int" value="720" />
+        <param name="W" type="int" value="1280" />
+    </node>
+</launch>

@@ -1,0 +1,11 @@
+<launch>
+    <!-- Rviz config -->
+    <arg name="rviz_enable" default="true"/>
+    <arg name="rivz_config" default="$(find p450_experiment)/launch_planning/prometheus_mid360.rviz"/>
+	<!-- 启动Rviz-->
+	<group if="$(arg rviz_enable)">
+        <node type="rviz" name="rviz1" pkg="rviz" args="-d $(arg rivz_config)"/>
+    </group>
+</launch>
+
+
