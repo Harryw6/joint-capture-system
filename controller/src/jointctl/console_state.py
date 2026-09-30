@@ -235,6 +235,8 @@ class ConsoleState:
                     item['arm_connected'] = obj.get('arm_connected')
                     item['command_inhibited'] = obj.get('command_inhibited') if not status['stale'] else None
                     item['teleop_error'] = obj.get('teleop_error') if not status['stale'] else None
+                    for key in ('stop_requested', 'stop_confirmed', 'stop_error'):
+                        item[key] = obj.get(key) if not status['stale'] else None
                     item['teleop_mode'] = obj.get('up_level_mode') if not status['stale'] else None
                     for key in ('speed_factor', 'movement_speed'):
                         value = obj.get(key)

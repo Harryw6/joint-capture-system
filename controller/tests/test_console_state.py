@@ -70,6 +70,19 @@ def test_stale_and_failed_status_does_not_claim_idle(tmp_path):
     assert state.snapshot()['hosts']['p450']['status']['error']=='offline'
 
 
+def test_stop_request_is_distinct_from_confirmation_and_expires(tmp_path):
+    clock = [10.]
+    state = make_state(tmp_path, monotonic=lambda: clock[0])
+    payload = {'gamepad': {'connected': False}, 'command_inhibited': True,
+               'stop_requested': True, 'stop_confirmed': False, 'stop_error': 'CAN down'}
+    state.sample_status('unitree', lambda: RemoteStatus('unitree', True, 'idle', json.dumps(payload)))
+    device = state.snapshot()['hosts']['unitree']
+    assert device['stop_requested'] is True and device['stop_confirmed'] is False
+    assert device['stop_error'] == 'CAN down'
+    clock[0] += 20.
+    assert state.snapshot()['hosts']['unitree']['stop_confirmed'] is None
+
+
 def test_complete_manifest_alone_is_not_validated(tmp_path):
     state=make_state(tmp_path)
     store=ManifestStore(state.root)

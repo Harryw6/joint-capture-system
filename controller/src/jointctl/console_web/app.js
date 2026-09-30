@@ -89,7 +89,9 @@
       row(target, '手柄识别', !stale && info?.gamepad ? info.gamepad.connected ? '已连接' : '未连接' : resources.stale === false && Array.isArray(devices) ? devices.length ? `系统已识别 ${devices.join(', ')}（待遥操确认）` : '未识别，请检查手柄 / 接收器' : '未知');
       row(target, '机械臂使能', stale || info?.arm_enabled == null ? '未确认' : info.arm_enabled ? '已使能' : '未使能');
       row(target, '遥操模式', stale ? '未知' : info?.teleop_mode === 'pose' ? '末端坐标移动' : info?.teleop_mode === 'joint' ? '关节控制' : '未知');
-      if (!stale && info?.command_inhibited) row(target, '遥操保护', '已禁止发送目标 · 重连后松开摇杆并按 Home 确认');
+      if (!stale && info?.command_inhibited) row(target, '遥操保护', '已锁定 · 排除故障并松开全部操作件后按 Home 确认');
+      if (!stale && info?.stop_requested) row(target, '停止状态', info.stop_confirmed ? '已收到机械臂急停状态反馈' : '已请求停止，尚未确认 · 检查实机并准备实体急停');
+      if (!stale && info?.stop_error) target.append(node('div', 'error-note', `停止指令异常：${info.stop_error}`));
       if (!stale && info?.teleop_error) target.append(node('div', 'error-note', String(info.teleop_error)));
       row(target, '常驻设备', stale ? '未知' : info?.session_prepared ? '已初始化 · 可连续采集' : '需要初始化 / 检查设备');
       for (const [key, label] of [['front', '前置相机'], ['wrist', '腕部相机']]) {

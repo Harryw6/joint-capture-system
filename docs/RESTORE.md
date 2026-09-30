@@ -31,7 +31,7 @@
 2. `heterovla-collection/config/collection.json` 保存现场路径、设备标识及遥操配置，换机时逐项核对。
 3. C++ 桥由 onboard/CMakeLists.txt 构建；需要 SDK2 的 include、lib/<arch> 与 thirdparty/lib/<arch>。SDK2 完整副本目前未补齐，不能把部分目录当成可用 SDK。
 4. `controller/remote/unitree/joint-can0-prepare`、`.service`、`.sudoers` 是受限 CAN 配置资源。helper 与 service 在盘点时与远端同名文件哈希一致；sudoers 是已有模板，不是本次读取 root 文件所得。部署时分别安装到 `/usr/local/sbin/joint-can0-prepare`、`/etc/systemd/system/joint-can0.service`、`/etc/sudoers.d/joint-can0`，按原权限设置并用 `visudo -cf` 检查；不要授予通用免密 sudo。
-5. `Gamepad_PiPER_runtime/Gamepad_PiPER` 包含当前手柄代码和机械臂模型，cuRobo 包含模型与架构相关扩展。配对、Home 使能、关节模式与限速逻辑保留现状；本次没有调用机械臂控制命令。
+5. `Gamepad_PiPER_runtime/Gamepad_PiPER` 包含上游手柄代码和机械臂模型，cuRobo 包含模型与架构相关扩展。采集界面必须通过 onboard 中配套的 `piper_gamepad_teleop.py`、`safe_teleop.py`、`piper_safety.py` 启动遥操；不要直接运行上游 `main.py` 绕过保护。2026-09-30 起 Home、松手和故障处理已修改，见 [遥操修复与验收说明](../controller/docs/2026-09-30-piper-teleop-safety.md)。初始化不会自动使能，本次没有执行实机运动测试。
 6. `heterovla-control` / `heterovla-recorder` 是旧控制/录制工具，与当前采集主链分开保留。旧远程推理需要自行恢复 SSH 配置和 `/home/unitree/.config/heterovla/control-token`；仓库不提供真实凭据。
 
 ## P450
