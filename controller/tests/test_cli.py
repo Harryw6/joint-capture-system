@@ -13,6 +13,34 @@ from jointctl.manifest import ManifestStore
 from jointctl.models import EpisodeManifest, EpisodeState
 
 
+@pytest.mark.parametrize('condition', ['idle', 'offline', 'leftover', 'local_active', 'prepare_failed'])
+def test_prepare_unitree_is_scoped_and_rechecks_ownership(tmp_path, monkeypatch, condition):
+    from types import SimpleNamespace
+    from jointctl.models import CommandResult, RemoteStatus
+    calls = []
+    class Unitree:
+        def status(self):
+            calls.append('status')
+            return RemoteStatus('unitree', condition != 'offline', 'idle',
+                                active=condition == 'leftover',
+                                episode_id='old' if condition == 'leftover' else None)
+        def prepare(self):
+            calls.append('prepare')
+            return CommandResult('unitree prepare', 1 if condition == 'prepare_failed' else 0)
+    class Drone:
+        def status(self):
+            raise AssertionError('Single-device initialization must not contact P450')
+        def prepare(self):
+            raise AssertionError('Single-device initialization must not initialize P450')
+    controller = SimpleNamespace(
+        store=SimpleNamespace(active=lambda: object() if condition == 'local_active' else None),
+        remotes={'unitree': Unitree(), 'p450': Drone()})
+    monkeypatch.setattr('jointctl.cli.make_controller', lambda _: controller)
+    result = main(['--manifest-root', str(tmp_path), 'prepare-unitree'])
+    assert (result == 0) == (condition == 'idle')
+    assert ('prepare' in calls) == (condition in {'idle', 'prepare_failed'})
+
+
 def test_successful_stop_defers_alignment_and_video_export(tmp_path, monkeypatch, capsys):
     from jointctl.models import CommandResult
     from types import SimpleNamespace

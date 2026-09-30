@@ -235,6 +235,8 @@ class ConsoleState:
                     item['arm_connected'] = obj.get('arm_connected')
                     item['command_inhibited'] = obj.get('command_inhibited') if not status['stale'] else None
                     item['teleop_error'] = obj.get('teleop_error') if not status['stale'] else None
+                    for key in ('stop_requested', 'stop_confirmed', 'stop_error'):
+                        item[key] = obj.get(key) if not status['stale'] else None
                     item['teleop_mode'] = obj.get('up_level_mode') if not status['stale'] else None
                     for key in ('speed_factor', 'movement_speed'):
                         value = obj.get(key)
@@ -277,6 +279,10 @@ class ConsoleState:
                               hosts['unitree'].get('camera_health', {}).values()))
         allowed = {'start': not busy and not active and all_idle and not camera_blocked,
                    'prepare': not busy and not active and all_idle,
+                   'prepare-unitree': (not busy and not active
+                       and not hosts['unitree']['status']['stale']
+                       and hosts['unitree']['status'].get('active') is False
+                       and not hosts['unitree']['status'].get('episode_id')),
                    'stop': not busy and active and episode is not None and not foreign,
                    'recover': not busy and (active or any(h['status'].get('active') or h['status'].get('episode_id') for h in hosts.values())),
                    'align': not busy and not active and episode is not None
@@ -349,7 +355,7 @@ class ConsoleState:
                 't0_desktop_ns','t1_desktop_ns','remote_directories','diagnostics','clock_monitor_closed_cleanly','metadata')}
 
     def submit(self, action, payload, *, expected_episode=None):
-        if action not in {'start','stop','recover','align','prepare','finalize'} or not isinstance(payload, dict):
+        if action not in {'start','stop','recover','align','prepare','prepare-unitree','finalize'} or not isinstance(payload, dict):
             raise ValueError('unsupported action')
         fields = {'instruction','task'} if action == 'start' else set()
         if set(payload)-fields:

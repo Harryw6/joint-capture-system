@@ -578,7 +578,7 @@ def _parser() -> argparse.ArgumentParser:
     start = commands.add_parser("start")
     start.add_argument("--instruction")
     start.add_argument("--task")
-    for name in ("stop", "status", "recover", "prepare"):
+    for name in ("stop", "status", "recover", "prepare", "prepare-unitree"):
         command = commands.add_parser(name)
         if name == 'stop':
             command.add_argument('--expected-episode', help='refuse automatic Stop if active episode changed')
@@ -639,17 +639,21 @@ def _run(args: argparse.Namespace) -> int:
         _emit(completed.to_dict())
         print(f'后处理验收通过：{completed.episode_id}', file=sys.stderr, flush=True)
         return EXIT_OK
-    if args.command == 'prepare':
+    if args.command in {'prepare', 'prepare-unitree'}:
         from concurrent.futures import ThreadPoolExecutor
         controller = make_controller(args)
         if controller.store.active() is not None:
             raise ValueError('已有活动会话，请先停止；初始化不会强制清理任何进程。')
-        statuses = controller._statuses()
+        selected = ({'unitree': controller.remotes['unitree']}
+                    if args.command == 'prepare-unitree' else controller.remotes)
+        statuses = {host: remote.status() for host, remote in selected.items()}
         if any(not s.reachable or s.last_error or s.active or s.episode_id for s in statuses.values()):
-            raise ValueError('两端必须连接且无遗留会话，才能初始化。')
-        print('正在准备 P450 定位/相机链路与 Unitree CAN；不会解锁或使能机械臂。', file=sys.stderr, flush=True)
+            raise ValueError('所选设备必须连接且无遗留会话，才能初始化。')
+        print('正在初始化机器狗相机、CAN 和手柄；不连接无人机、不开始录制、不使能机械臂。'
+              if args.command == 'prepare-unitree' else
+              '正在准备 P450 定位/相机链路与 Unitree CAN；不会解锁或使能机械臂。', file=sys.stderr, flush=True)
         with ThreadPoolExecutor(max_workers=2) as pool:
-            pending = {host: pool.submit(remote.prepare) for host, remote in controller.remotes.items()}
+            pending = {host: pool.submit(remote.prepare) for host, remote in selected.items()}
             results = {host: future.result() for host, future in pending.items()}
         _emit({host: result.to_dict() for host, result in results.items()})
         failed = [host + ': ' + (r.stderr or r.stdout) for host, r in results.items() if not r.ok]
@@ -795,7 +799,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         try:
-            if args.command in {'start', 'stop', 'recover', 'align', 'prepare', 'finalize'}:
+            if args.command in {'start', 'stop', 'recover', 'align', 'prepare', 'prepare-unitree', 'finalize'}:
                 config = _load_config(Path(args.config))
                 with operation_lock(_manifest_root(args, config)):
                     return _run(args)

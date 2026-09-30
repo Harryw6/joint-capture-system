@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from piper_safety import SafetyGuard, monitored_piper
 
 
 JOINT_NAMES = tuple(f"joint_{index}.pos" for index in range(1, 7))
@@ -104,24 +105,16 @@ def input_snapshot(controller) -> dict[str, Any]:
 
 
 def send_command(piper, controller, state: dict[str, Any], *, gamepad_connected: bool = True) -> bool:
-    if (not gamepad_connected or getattr(controller, 'command_inhibited', False)
+    if not gamepad_connected:
+        stop = getattr(controller, 'safety_stop', None)
+        if stop is not None:
+            stop('手柄断连，已请求停止')
+        return False
+    if (getattr(controller, 'command_inhibited', False)
             or not state["arm_connected"] or not state["arm_enabled"]):
         return False
-    import numpy as np  # type: ignore
-
-    if state["low_level_mode"] == "joint":
-        joints = np.round(np.degrees(state["joints"][:6]) * 1000).astype(int).tolist()
-        piper.ModeCtrl(0x01, 0x01, state["movement_speed"], state["command_mode"])
-        piper.JointCtrl(*joints)
-    else:
-        pose = state["xyz_rpy"].copy()
-        pose[:3] = np.round(pose[:3] * 1_000_000)
-        pose[3:] = np.round(pose[3:] * 1000)
-        piper.ModeCtrl(0x01, 0x00, state["movement_speed"], state["command_mode"])
-        piper.EndPoseCtrl(*pose.astype(int).tolist())
-    gripper = int(controller.gripper_max_width * state["gripper"] * 10_000)
-    piper.GripperCtrl(gripper, 3000, 0x01, 0)
-    return True
+    # Never fall back to the unguarded upstream sender.
+    return bool(controller.send_safe_command())
 
 
 def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
@@ -138,20 +131,26 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
     csv_path = raw_dir / "piper_gamepad.csv"
     snapshot_path = raw_dir / "piper_gamepad_snapshot.json"
     stop = False
+    guard = None
 
     def request_stop(_signum, _frame):
         nonlocal stop
         stop = True
+        if guard is not None:
+            # Signal handlers never perform CAN I/O; reject subsequent sends immediately.
+            guard.shutdown_requested.set()
 
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
 
-    piper = C_PiperInterface_V2(
+    piper = monitored_piper(C_PiperInterface_V2)(
         config["can_interface"],
         start_sdk_joint_limit=True,
         start_sdk_gripper_limit=True,
     )
     controller = Controller(piper, str(urdf), None, root_name, target_link_name)
+    guard = SafetyGuard(piper)
+    controller.attach_safety(guard)
     period = 1.0 / float(gamepad_config.get("control_hz", 200))
     next_tick = time.monotonic()
     sequence = 0
@@ -179,6 +178,7 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
     ]
 
     try:
+        guard.start()
         output = (SegmentCsv(session_dir / "segment.json", config["data_root"], fields)
                   if session_dir else csv_path.open("w", newline=""))
         with output as csv_file:
@@ -187,9 +187,12 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 writer.writeheader()
             while not stop:
                 controller.update()
+                if stop:
+                    break
                 state = controller.get_state()
                 gamepad = input_snapshot(controller)
                 sent = send_command(piper, controller, state, gamepad_connected=gamepad["connected"])
+                controller._sync_guard()
                 monotonic_ns = time.monotonic_ns()
                 wall_time_ns = time.time_ns()
                 sequence += 1
@@ -202,7 +205,7 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
                     "wall_time_ns": wall_time_ns,
                     "seq": sequence,
                     "valid": bool(gamepad["connected"] and state["arm_connected"] and state["arm_enabled"]
-                                  and not getattr(controller, 'command_inhibited', False)),
+                                  and not guard.inhibited and controller._arm_deadline is None),
                     "arm_connected": bool(state["arm_connected"]),
                     "arm_enabled": bool(state["arm_enabled"]),
                     "up_level_mode": state["up_level_mode"],
@@ -213,6 +216,9 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
                     "command_sent": sent,
                     "command_inhibited": bool(getattr(controller, 'command_inhibited', False)),
                     "teleop_error": getattr(controller, 'safety_fault', None) or getattr(controller, 'ik_error', None),
+                    "stop_requested": guard.stop_requested,
+                    "stop_confirmed": guard.stop_confirmed,
+                    "stop_error": guard.stop_error,
                     "target": targets,
                     "target_pose": [float(value) for value in state["xyz_rpy"]],
                     "gamepad": gamepad,
@@ -254,7 +260,19 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 else:
                     next_tick = time.monotonic()
     finally:
-        pygame.quit()
+        try:
+            guard.close()
+            controller._sync_guard()
+            atomic_json(snapshot_path, {
+                "wall_time_ns": time.time_ns(), "valid": False,
+                "gamepad": {"connected": False}, "arm_enabled": controller.arm_enabled,
+                "arm_connected": controller.arm_connected, "command_inhibited": True,
+                "teleop_error": controller.safety_fault,
+                "stop_requested": guard.stop_requested, "stop_confirmed": guard.stop_confirmed,
+                "stop_error": guard.stop_error,
+            })
+        finally:
+            pygame.quit()
     return 0
 
 
