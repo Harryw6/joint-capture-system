@@ -25,6 +25,36 @@ def test_unknown_initial_state_cannot_start(tmp_path):
     assert not snap['allowed']['start']
 
 
+def test_unitree_only_prepare_does_not_require_drone(tmp_path):
+    clock = [10.0]
+    state = make_state(tmp_path, monotonic=lambda: clock[0])
+    state.sample_status('unitree', lambda: RemoteStatus('unitree', True, 'idle'))
+    allowed = state.snapshot()['allowed']
+    assert allowed['prepare-unitree']
+    assert not allowed['prepare'] and not allowed['start']
+    clock[0] += 20
+    assert not state.snapshot()['allowed']['prepare-unitree']
+
+
+def test_unitree_only_prepare_refuses_leftover_episode(tmp_path):
+    state = make_state(tmp_path)
+    state.sample_status('unitree', lambda: RemoteStatus(
+        'unitree', True, 'cleanup_pending', active=True, episode_id='unfinished'))
+    assert not state.snapshot()['allowed']['prepare-unitree']
+    with pytest.raises(RuntimeError):
+        state.submit('prepare-unitree', {})
+
+
+def test_unitree_only_prepare_dispatches_scoped_cli(tmp_path):
+    calls = []
+    state = make_state(tmp_path, runner=lambda argv, directory: calls.append(argv) or 0)
+    state.sample_status('unitree', lambda: RemoteStatus('unitree', True, 'idle'))
+    state.submit('prepare-unitree', {})
+    state.worker.join(timeout=3)
+    assert len(calls) == 1 and calls[0][-1] == 'prepare-unitree'
+    assert state.job['state'] == 'succeeded'
+
+
 def test_camera_failure_blocks_recording_but_allows_reinitialization(tmp_path):
     state = make_state(tmp_path)
     idle(state)

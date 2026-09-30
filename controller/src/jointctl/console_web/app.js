@@ -8,8 +8,8 @@
   let lastSuccess = null;
   let polling = false;
   let submittedJobId = null;
-  const actions = ['start', 'stop', 'recover', 'finalize', 'align', 'prepare'];
-  const labels = {start: '开始采集', stop: '停止并保存', recover: '核对遗留会话', finalize: '校验待处理数据', align: '重新校验本条', prepare: '初始化设备'};
+  const actions = ['start', 'stop', 'recover', 'finalize', 'align', 'prepare', 'prepare-unitree'];
+  const labels = {start: '开始采集', stop: '停止并保存', recover: '核对遗留会话', finalize: '校验待处理数据', align: '重新校验本条', prepare: '初始化设备', 'prepare-unitree': '仅初始化机器狗'};
   const expandedDevices = new Set();
   const phases = {running: '执行中', succeeded: '已完成', failed: '失败', interrupted: '曾中断', validating: '校验中'};
   const states = {recording: '采集中', active: '采集中', idle: '空闲', stopped: '已停止', cleanup_pending: '待停止确认', unknown: '未知'};
