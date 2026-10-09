@@ -70,6 +70,13 @@ class StateCursor:
             raise ValueError('missing or stale state row')
         return chosen
 
+    def at_or_before(self,stamp,limit_ns):
+        while self.right is not None and self.right['monotonic_ns']<=stamp:
+            self.left,self.right=self.right,self._next()
+        if self.left is None or stamp-self.left['monotonic_ns']>limit_ns:
+            raise ValueError('missing or stale command row at image time')
+        return self.left
+
 
 class ClockMapping:
     def __init__(self,path,episode):
@@ -180,9 +187,12 @@ def convert_episode(source,output,*,target,mapping,config):
     if target not in ('pkl','video'): raise ValueError('target must be pkl or video')
     if output.exists(): raise FileExistsError(str(output))
     clock=ClockMapping(mapping,source)
+    if mapping is not None and not clock.valid:
+        raise ValueError('invalid training alignment mapping: ' + str(clock.reason))
     output.mkdir(parents=True)
     report={'source':str(source),'target':target,'exported':0,'rejected':0,'errors':[],
-            'alignment_valid':False,'alignment_reason':clock.reason,'training_ready':False}
+            'alignment_valid':False,'alignment_reason':clock.reason,'training_ready':False,
+            'export_kind':'aligned' if clock.valid else 'preview','trimmed':0,'data_rejected':0}
     if target=='video':
         report['streams']=export_video(source,output,config,clock)
         report['exported']=sum(s['frames'] for s in report['streams'].values())
@@ -202,12 +212,21 @@ def convert_episode(source,output,*,target,mapping,config):
             for front,wrist in pair_frames(iter_camera_frames(source,'front'),iter_camera_frames(source,'wrist'),int(config.get('max_camera_skew_ms',50)*1e6)):
                 m=front[0]
                 try:
+                    # Normal pre/post-roll is excluded before matching state streams.
+                    if clock.valid and clock.restore(m['wall_time_ns']) is None:
+                        report['rejected']+=1
+                        report['trimmed']+=1
+                        rejects.writerow([m['seq'],'outside supported common alignment interval'])
+                        continue
                     if wrist is None: raise ValueError('no unique wrist frame within skew limit')
                     if missing: raise ValueError('; '.join(missing))
-                    states={n:cursor.nearest(m['monotonic_ns'],int(limits[n]*1e6)) for n,cursor in cursors.items()}
+                    states={n:(cursor.at_or_before if n=='piper_gamepad' else cursor.nearest)(
+                        m['monotonic_ns'],int(limits[n]*1e6)) for n,cursor in cursors.items()}
                     gamepad=states['piper_gamepad']
                     if any(gamepad.get(k)!=1 for k in ('arm_enabled','arm_connected','gamepad_connected')):
                         raise ValueError('Home/arm enable or gamepad connection absent')
+                    if gamepad.get('command_sent')!=1:
+                        raise ValueError('control target was not sent')
                     joint_keys=['joint_'+str(i)+'.pos' for i in range(1,7)]+['gripper.pos']
                     piper=states['piper_state']
                     command={**gamepad,'valid':True,'target':{k:gamepad[k] for k in joint_keys},
@@ -219,6 +238,11 @@ def convert_episode(source,output,*,target,mapping,config):
                         raise ValueError('Cartesian command target pose missing from raw CSV')
                     mapped={n:clock.restore(frame[0]['wall_time_ns']) for n,frame in (('front',front),('wrist',wrist))}
                     valid=all(v is not None for v in mapped.values()) and all(clock.restore(row['wall_time_ns']) is not None for row in states.values())
+                    if clock.valid and not valid:
+                        report['rejected']+=1
+                        report['trimmed']+=1
+                        rejects.writerow([m['seq'],'camera or state outside supported common alignment interval'])
+                        continue
                     record={'timestamp_ns':max(m['wall_time_ns'],wrist[0]['wall_time_ns']),
                         'frame_index':report['exported'],'camera':{n:{**frame[0],'rgb':png_bytes(frame[1])} for n,frame in (('front',front),('wrist',wrist))},
                         'go2':{n:go2_record(states[n],n) for n in ('sport_mode_state','low_state')},
@@ -232,11 +256,12 @@ def convert_episode(source,output,*,target,mapping,config):
                     aligned+=int(valid)
                 except (ValueError,KeyError) as exc:
                     report['rejected']+=1
+                    report['data_rejected']+=1
                     rejects.writerow([m['seq'],str(exc)])
                     if len(report['errors'])<100: report['errors'].append(str(exc))
         report['alignment_valid']=bool(report['exported'] and aligned==report['exported'])
         integrity=inspect_episode(source)
-        report['training_ready']=bool(report['alignment_valid'] and integrity['application_integrity'] and not report['rejected'])
+        report['training_ready']=bool(report['alignment_valid'] and integrity['application_integrity'] and not report['data_rejected'])
     if mapping is not None: shutil.copy2(mapping,output/'source_alignment.json')
     durable_json(output/'conversion_report.json',report)
     return report

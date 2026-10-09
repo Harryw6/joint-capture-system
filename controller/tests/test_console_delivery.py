@@ -19,6 +19,8 @@ def test_installer_delivers_console_and_preserves_existing_data(tmp_path):
     assert result.returncode==0,result.stderr
     assert (target/'JointConsole.bat').is_file()
     assert (target/'JointCapture/src/jointctl/console.py').is_file()
+    assert (target/'JointCapture/src/jointctl/preview.py').is_file()
+    assert (target/'JointCapture/src/jointctl/console_web/preview.js').is_file()
     assert (records/'sentinel').read_text()=='keep'
 
 

@@ -36,6 +36,10 @@ Unitree 已部署 root 所有的 `/usr/local/sbin/joint-can0-prepare`、`/etc/sy
 
 安装后双击 `D:\OneDriveData\Desktop\JointConsole.bat`，或打开 `http://127.0.0.1:8766/`（后台须先启动）。无需 Node.js、云服务或外网。入口启动独立后台并打开浏览器；不会自动开始录制。网页关闭/刷新不终止采集，重新打开会读取当前实际状态。
 
+无人机实时画面：设备初始化后，点击“开启预览”。控制台通过无人机现有 rosbridge 的 `sensor_msgs/CompressedImage` 话题直接订阅彩色 JPEG，默认每秒 5 帧、仅保留最新画面，不写入采集文件。关闭预览、切到后台页面会取消订阅；返回页面后恢复连接。源时间戳必须连续推进才能显示“实时”，2 秒无新画面会清除旧图，连接中断自动重连。该预览不启动相机或录制，关闭预览不停止采集。
+
+默认配置为 `p450.preview.url=ws://192.168.1.11:9090`、`topic=/uav1/camera/color/image_raw/compressed`、`fps=5`；帧率可设为 1–10。地址须为私网 IPv4 的 ws/wss 服务，页面只允许连接这个明确地址。PC 有线口须能访问无人机网段，ROS 彩色相机和 rosbridge 须已运行。采集控制仍沿用原有 SSH 配置，预览可独立验证。协议参考：[rosbridge 官方说明](https://github.com/RobotWebTools/rosbridge_suite/blob/ros2/ROSBRIDGE_PROTOCOL.md)。
+
 填写任务名称与采集说明，点击“开始联合采集”；等待双方就绪。点击“停止录制”后等待两端停止确认，即可开始下一条。设备空闲时再点击“处理待办”，执行原始数据收尾、完整性校验和对时报告生成。此流程不自动导出视频；需要视频时自行另行导出。准备、停止、处理待办过程中不要重复运行其他控制命令。网页和 CLI 共用操作锁，发生冲突会拒绝第二个操作而不是排队重放。
 
 设备卡显示当前/上次远端数据路径、数据增长、整机 RAM 和数据盘剩余空间。RAM 已用为 MemTotal-MemAvailable。状态与资源目标每 2 秒采样，失败后退避；数据超过 6 秒或探测失败标记过期，未知不等于零。设备不在线时仍可打开界面。后台任务日志位于 `joint_manifests\.console\jobs`。

@@ -439,7 +439,7 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(recovered, [raw / "flight_0.bag"])
         self.assertEqual(source.read_bytes(), b"original-unindexed")
         self.assertEqual((raw / "flight_0.bag").read_bytes(), b"reindexed")
-        self.assertTrue((session / "recovery" / source.name).is_file())
+        self.assertFalse(list((session / "recovery").glob(".reindex-*")))
 
     def test_finish_recovers_active_bag_before_export(self):
         session = self.root / "session"
@@ -461,7 +461,7 @@ class OrchestratorTests(unittest.TestCase):
         result = self.orchestrator.finish()
 
         self.assertEqual(result["frame_count"], 42)
-        self.assertEqual((raw / "flight_0.bag").read_bytes(), b"reindexed")
+        self.assertEqual((raw / "flight_000000.bag").read_bytes(), b"reindexed")
         self.assertFalse(self.orchestrator.capture_state_path.exists())
 
     def test_shutdown_refuses_while_recording(self):

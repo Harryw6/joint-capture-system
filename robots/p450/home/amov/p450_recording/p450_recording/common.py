@@ -237,3 +237,34 @@ def interpolate_pose(
         "interpolated", target_ns, nearest_stamp, nearest_delta_ms, interpolated,
         True, prev_stamp, next_stamp, alpha,
     )
+
+
+def bag_sort_key(path):
+    """Order historical unpadded rosbag split suffixes numerically."""
+    return tuple((1, int(part)) if part.isdigit() else (0, part)
+                 for part in re.split(r"(\d+)", path.name))
+
+
+def padded_bag_path(path):
+    match = re.fullmatch(r"flight_(\d+)\.bag", path.name)
+    return path.with_name("flight_{:06d}.bag".format(int(match.group(1)))) if match else path
+
+
+def pending_bags(directory):
+    """Retain interrupted originals once a nonempty finalized copy exists."""
+    return [path for path in sorted(directory.glob("*.bag.active"), key=bag_sort_key)
+            if not any(target.is_file() and target.stat().st_size > 0
+                       for target in (path.with_suffix(""), padded_bag_path(path.with_suffix(""))))]
+
+
+def normalize_bag_names(directory):
+    """rosbag generates unpadded suffixes; normalize completed shards at finalization."""
+    changes = {}
+    for source in sorted(directory.glob("*.bag"), key=bag_sort_key):
+        target = padded_bag_path(source)
+        if target != source:
+            if target.exists():
+                raise RuntimeError("duplicate bag shard: {} and {}".format(source, target))
+            source.rename(target)
+            changes[source] = target
+    return changes

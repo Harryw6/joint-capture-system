@@ -1,6 +1,10 @@
 {
   "manifest_root": "episodes",
-  "p450": {"host": "p450", "kind": "p450"},
+  "p450": {"host": "p450", "kind": "p450", "preview": {
+    "url": "ws://192.168.1.11:9090",
+    "topic": "/uav1/camera/color/image_raw/compressed",
+    "fps": 5
+  }},
   "unitree": {"host": "unitree", "kind": "unitree"},
   "ssh_timeout_s": 30.0,
   "start_timeout_s": 120.0,

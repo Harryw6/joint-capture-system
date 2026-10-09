@@ -14,6 +14,7 @@ import webbrowser
 
 from .console_state import ConsoleState
 from .telemetry import safe_json
+from .preview import preview_config
 
 IDENTITY = 'joint-capture-console-v1'
 WEB_ROOT = Path(__file__).with_name('console_web')
@@ -21,6 +22,8 @@ WEB_ROOT = Path(__file__).with_name('console_web')
 
 def make_server(state, port=8766):
     token = secrets.token_urlsafe(32)
+    preview = preview_config(getattr(state, 'config', {}))
+    preview_origin = ' ' + preview['url'] if preview['enabled'] else ''
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -51,7 +54,7 @@ def make_server(state, port=8766):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
-            self.send_header('Content-Security-Policy', "default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'self'; connect-src 'self'" + preview_origin + "; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
             self.end_headers()
             try:
                 self.wfile.write(payload)
@@ -66,6 +69,8 @@ def make_server(state, port=8766):
                                          'config': str(state.config_path), 'pid': os.getpid()})
             if self.path == '/api/session':
                 return self._reply(200, {'token': token})
+            if self.path == '/api/preview':
+                return self._reply(200, preview)
             if self.path == '/api/state':
                 try:
                     return self._reply(200, state.snapshot())
@@ -73,6 +78,7 @@ def make_server(state, port=8766):
                     return self._reply(500, {'error': f'读取状态失败：{exc}'})
             static = {'/': ('index.html', 'text/html; charset=utf-8'),
                       '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                      '/preview.js': ('preview.js', 'text/javascript; charset=utf-8'),
                       '/style.css': ('style.css', 'text/css; charset=utf-8')}
             if self.path not in static:
                 return self._reply(404, {'error': 'not found'})
@@ -97,6 +103,14 @@ def make_server(state, port=8766):
             if length < 0 or self.headers.get('Transfer-Encoding'):
                 return self._reply(400, {'error': '需要固定长度请求'})
             if length > 16384:
+                # Closing with an unread upload can reset the connection on
+                # Windows before the browser receives the rejection. Drain a
+                # bounded amount; never allocate/read an arbitrary upload.
+                if length <= 65536:
+                    try:
+                        self.rfile.read(length)
+                    except OSError:
+                        pass
                 return self._reply(413, {'error': '请求过大'})
             try:
                 payload = json.loads(self.rfile.read(length))

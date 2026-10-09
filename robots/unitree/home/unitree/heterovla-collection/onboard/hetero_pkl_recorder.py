@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import copy
+from functools import lru_cache
 import json
 import math
 import os
@@ -163,6 +165,51 @@ class CameraReader:
             self._thread.join(timeout=3)
 
 
+@lru_cache(maxsize=None)
+def feedback_piper(base):
+    """Keep SDK values and the receipt times of all five CAN feedback frames together."""
+    class FeedbackPiper(base):
+        # The SDK singleton must not return another interface type on this CAN bus.
+        _instances = {}
+        _lock = threading.Lock()
+        feedback_ids = (0x2A1, 0x2A5, 0x2A6, 0x2A7, 0x2A8)
+
+        def __init__(self, *args, **kwargs):
+            if not hasattr(self, "_feedback_lock"):
+                self._feedback_lock = threading.RLock()
+                self._feedback_times = {}
+            super().__init__(*args, **kwargs)
+
+        def ParseCANFrame(self, frame):
+            # Serialize parsing and snapshots so a timestamp cannot describe older values.
+            with self._feedback_lock:
+                result = super().ParseCANFrame(frame)
+                if (frame is not None and not frame.is_error_frame
+                        and not frame.is_remote_frame and not frame.is_extended_id
+                        and len(frame.data) == 8 and frame.arbitration_id in self.feedback_ids):
+                    self._feedback_times[frame.arbitration_id] = (time.monotonic_ns(), time.time_ns())
+                return result
+
+        def feedback_snapshot(self, timeout_ns=250_000_000):
+            with self._feedback_lock:
+                now = time.monotonic_ns()
+                stale = [key for key in self.feedback_ids if key not in self._feedback_times
+                         or not 0 <= now - self._feedback_times[key][0] <= timeout_ns]
+                if stale:
+                    raise RuntimeError("missing or stale Piper CAN feedback: " +
+                                       ", ".join(hex(key) for key in stale))
+                joints = copy.deepcopy(self.GetArmJointMsgs())
+                gripper = copy.deepcopy(self.GetArmGripperMsgs())
+                status = copy.deepcopy(self.GetArmStatus())
+                if any(not math.isfinite(float(msg.time_stamp)) or msg.time_stamp <= 0
+                       for msg in (joints, gripper, status)):
+                    raise RuntimeError("invalid Piper SDK feedback timestamp")
+                state_time = min((self._feedback_times[key] for key in self.feedback_ids[1:]),
+                                 key=lambda stamp: stamp[0])
+                return joints, gripper, status, state_time, self._feedback_times[0x2A1]
+    return FeedbackPiper
+
+
 class PiperReader:
     def __init__(self, can_name: str, raw_dir: Path, period_s: float = 0.005):
         self.can_name = can_name
@@ -185,12 +232,12 @@ class PiperReader:
         try:
             from piper_sdk import C_PiperInterface_V2  # type: ignore
 
-            piper = C_PiperInterface_V2(
+            piper = feedback_piper(C_PiperInterface_V2)(
                 self.can_name,
                 start_sdk_joint_limit=True,
                 start_sdk_gripper_limit=True,
             )
-            piper.ConnectPort()
+            piper.ConnectPort(piper_init=False)
             time.sleep(0.5)
             if not piper.isOk():
                 raise RuntimeError("Piper CAN receive thread is not healthy")
@@ -204,6 +251,8 @@ class PiperReader:
                     "seq",
                     *JOINT_NAMES,
                     GRIPPER_NAME,
+                    "sdk_joint_time_stamp",
+                    "sdk_gripper_time_stamp",
                 ]
                 status_fields = [
                     "monotonic_ns",
@@ -212,16 +261,19 @@ class PiperReader:
                     "ctrl_mode",
                     "arm_status",
                     "teach_status",
+                    "sdk_status_time_stamp",
                 ]
                 state_writer = csv.DictWriter(state_file, fieldnames=state_fields)
                 status_writer = csv.DictWriter(status_file, fieldnames=status_fields)
                 state_writer.writeheader()
                 status_writer.writeheader()
                 next_tick = time.monotonic()
+                last_state_stamp = last_status_stamp = None
+                status_seq = 0
                 while not self._stop.is_set():
-                    monotonic = time.monotonic_ns()
-                    wall = time.time_ns()
-                    joints_msg = piper.GetArmJointMsgs().joint_state
+                    joint_feedback, gripper_feedback, status_feedback, state_time, status_time = piper.feedback_snapshot()
+                    monotonic, wall = state_time
+                    joints_msg = joint_feedback.joint_state
                     joints_raw = [
                         joints_msg.joint_1,
                         joints_msg.joint_2,
@@ -231,44 +283,43 @@ class PiperReader:
                         joints_msg.joint_6,
                     ]
                     joints = [math.radians(float(value) / 1000.0) for value in joints_raw]
-                    gripper_raw = piper.GetArmGripperMsgs().gripper_state.grippers_angle
+                    gripper_raw = gripper_feedback.gripper_state.grippers_angle
                     gripper = float(gripper_raw) / 1_000_000.0
-                    arm_status = piper.GetArmStatus().arm_status
+                    arm_status = status_feedback.arm_status
                     status = {
                         "ctrl_mode": int(getattr(arm_status, "ctrl_mode", -1)),
                         "arm_status": int(getattr(arm_status, "arm_status", -1)),
                         "teach_status": int(getattr(arm_status, "teach_status", -1)),
                     }
-                    self.rows += 1
                     state = dict(zip(JOINT_NAMES, joints))
                     state[GRIPPER_NAME] = gripper
-                    state_writer.writerow(
-                        {
-                            "monotonic_ns": monotonic,
-                            "wall_time_ns": wall,
-                            "seq": self.rows,
-                            **state,
-                        }
-                    )
-                    status_writer.writerow(
-                        {
-                            "monotonic_ns": monotonic,
-                            "wall_time_ns": wall,
-                            "seq": self.rows,
-                            **status,
-                        }
-                    )
-                    if self.rows % 200 == 0:
-                        state_file.flush()
-                        status_file.flush()
-                    with self._lock:
-                        self._latest = {
-                            "monotonic_ns": monotonic,
-                            "wall_time_ns": wall,
-                            "seq": self.rows,
-                            "state": state,
-                            "status": status,
-                        }
+                    if monotonic != last_state_stamp:
+                        self.rows += 1
+                        state_writer.writerow({
+                            "monotonic_ns": monotonic, "wall_time_ns": wall, "seq": self.rows,
+                            **state, "sdk_joint_time_stamp": joint_feedback.time_stamp,
+                            "sdk_gripper_time_stamp": gripper_feedback.time_stamp,
+                        })
+                        last_state_stamp = monotonic
+                        with self._lock:
+                            self._latest = {
+                                "monotonic_ns": monotonic, "wall_time_ns": wall,
+                                "seq": self.rows, "state": state, "status": status,
+                                "status_monotonic_ns": status_time[0],
+                                "sdk_joint_time_stamp": joint_feedback.time_stamp,
+                                "sdk_gripper_time_stamp": gripper_feedback.time_stamp,
+                            }
+                        if self.rows % 200 == 0:
+                            state_file.flush()
+                            status_file.flush()
+                    if status_time[0] != last_status_stamp:
+                        status_seq += 1
+                        status_writer.writerow({
+                            "monotonic_ns": status_time[0], "wall_time_ns": status_time[1],
+                            "seq": status_seq, **status,
+                            "sdk_status_time_stamp": status_feedback.time_stamp,
+                        })
+                        last_status_stamp = status_time[0]
                     next_tick += self.period_s
                     delay = next_tick - time.monotonic()
                     if delay > 0:

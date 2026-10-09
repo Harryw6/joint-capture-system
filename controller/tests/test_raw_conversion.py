@@ -81,9 +81,9 @@ def test_invalid_clock_mapping_does_not_claim_alignment(tmp_path):
     state_fixture(source)
     mapping=tmp_path/'alignment.json'
     mapping.write_text(json.dumps({'quality':{'degraded':True},'valid_interval':None}))
-    report=convert_episode(source,tmp_path/'export',target='pkl',mapping=mapping,config=CONFIG)
-    assert not report['alignment_valid'] and not report['training_ready']
-    assert report['alignment_reason']
+    with pytest.raises(ValueError,match='invalid training alignment mapping'):
+        convert_episode(source,tmp_path/'export',target='pkl',mapping=mapping,config=CONFIG)
+    assert not (tmp_path/'export').exists()
 
 
 def test_video_export_keeps_timestamp_sidecar(tmp_path):

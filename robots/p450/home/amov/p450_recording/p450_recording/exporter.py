@@ -13,6 +13,9 @@ from .common import (
     interpolate_pose,
     quaternion_to_euler,
     stamp_to_ns,
+    bag_sort_key,
+    pending_bags,
+    padded_bag_path,
 )
 
 
@@ -66,11 +69,18 @@ ALIGNMENT_FIELDS = [
 
 def _find_bags(session_dir):
     raw_dir = session_dir / "raw"
-    bags = sorted(raw_dir.glob("*.bag"))
+    unresolved = pending_bags(raw_dir) + pending_bags(session_dir)
+    if unresolved:
+        raise ValueError("unfinished .bag.active shards; run finalize-raw before export: " +
+                         ", ".join(path.name for path in unresolved))
+    bags = sorted(raw_dir.glob("*.bag"), key=bag_sort_key)
     if not bags:
-        bags = sorted(session_dir.glob("*.bag"))
+        bags = sorted(session_dir.glob("*.bag"), key=bag_sort_key)
     if not bags:
         raise ValueError(f"no .bag files found under {session_dir}")
+    canonical = [padded_bag_path(path) for path in bags]
+    if len(set(canonical)) != len(canonical):
+        raise ValueError("duplicate shard names; resolve legacy/padded copies before export")
     return bags
 
 

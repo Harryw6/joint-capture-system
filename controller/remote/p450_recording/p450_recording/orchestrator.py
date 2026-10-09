@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .exporter import export_session
+from .common import normalize_bag_names, pending_bags
 from .manager import DEFAULT_DATA_ROOT, RecorderManager
 from .process_tracking import (process_exists as _linux_process_exists,
     process_identity as _process_identity, descendants as _descendants,
@@ -117,7 +118,8 @@ def _alignment_summary(path):
 
 
 def _bag_is_ready(session_dir):
-    return any((Path(session_dir) / "raw").glob("*.bag"))
+    raw = Path(session_dir) / "raw"
+    return not pending_bags(raw) and any(raw.glob("*.bag"))
 
 
 def _rosbag_reindex(active_path, output_dir):
@@ -144,20 +146,27 @@ def recover_interrupted_bags(session_dir, reindexer=None):
     recovery_dir = session_dir / "recovery"
     reindexer = reindexer or _rosbag_reindex
     recovered = []
-    for source in sorted(raw_dir.glob("*.bag.active")):
+    for source in pending_bags(raw_dir):
         target = source.with_suffix("")
-        if target.exists():
-            continue
-        reindexed = recovery_dir / source.name
-        if not reindexed.exists():
-            reindexer(source, recovery_dir)
-        if not reindexed.is_file() or reindexed.stat().st_size <= 0:
-            raise RuntimeError(
-                "rosbag reindex produced no usable output for {}".format(source)
-            )
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        # A failed reindex may leave a nonempty but unindexed copy. Never
+        # treat file existence as evidence that a previous attempt succeeded.
+        attempt = recovery_dir / (".reindex-" + uuid.uuid4().hex)
         temporary = target.with_suffix(target.suffix + ".recovering")
-        shutil.copy2(str(reindexed), str(temporary))
-        os.replace(str(temporary), str(target))
+        try:
+            reindexer(source, attempt)
+            reindexed = attempt / source.name
+            if not reindexed.is_file() or reindexed.stat().st_size <= 0:
+                raise RuntimeError(
+                    "rosbag reindex produced no usable output for {}".format(source)
+                )
+            shutil.copy2(str(reindexed), str(temporary))
+            os.replace(str(temporary), str(target))
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+            if attempt.exists():
+                shutil.rmtree(str(attempt))
         recovered.append(target)
     return recovered
 
@@ -560,20 +569,22 @@ class CaptureOrchestrator:
             raise RuntimeError("cannot finalize raw data while recording")
         deadline = time.monotonic() + self.bag_finalize_timeout
         recovered_bags = []
-        while not self.bag_ready_provider(session_dir):
+        while pending_bags(session_dir / "raw") or not self.bag_ready_provider(session_dir):
             if time.monotonic() >= deadline:
                 recovered_bags = recover_interrupted_bags(
                     session_dir, reindexer=self.bag_reindexer
                 )
-                if not self.bag_ready_provider(session_dir):
+                if pending_bags(session_dir / "raw") or not self.bag_ready_provider(session_dir):
                     raise RuntimeError(
                         f"rosbag did not finalize within "
                         f"{self.bag_finalize_timeout:.1f} seconds: {session_dir}"
                     )
                 break
             self.sleep_func(0.1)
+        renamed = normalize_bag_names(session_dir / "raw")
         return {"session_dir": str(session_dir),
-                "recovered_bags": [str(path) for path in recovered_bags]}
+                "recovered_bags": [str(renamed.get(path, path)) for path in recovered_bags],
+                "renamed_bags": {str(source): str(target) for source, target in renamed.items()}}
 
     def export(self, session_dir):
         raw = self.finalize_raw(session_dir)
