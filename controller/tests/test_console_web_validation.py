@@ -83,4 +83,24 @@ def test_legacy_recorder_drops_warn_during_recording(tmp_path):
         "elapsed_s": 10, "remaining_s": 1700, "disk_warning_bytes": 10 * 1024 ** 3,
     })
     assert "Dropped: 12" in html
+
+
+@pytest.mark.skipif(not __import__('os').path.isfile(CHROME), reason='browser not installed')
+def test_powered_arm_and_blocked_teleop_are_distinct_in_the_console(tmp_path):
+    hosts = {name: {'status': {'stale': False, 'active': False,
+                              'state': 'idle', 'reachable': True},
+                    'resources': {'stale': True}} for name in ('p450', 'unitree')}
+    hosts['unitree'].update(gamepad={'connected': True}, arm_enabled=False,
+        motor_enabled=[True] * 6, command_inhibited=True,
+        feedback_error='原始关节反馈超限：J2=-2.494deg')
+    html = browser_html(tmp_path, {
+        'active': False, 'operation_busy': False, 'hosts': hosts,
+        'episode': None, 'job': None,
+        'allowed': {name: False for name in ('start', 'stop', 'recover', 'finalize', 'align', 'prepare')},
+        'postprocess': {'pending_count': 0}, 'clock': {'degraded': True, 'reasons': []},
+        'validation': {'state': 'unavailable', 'report': None, 'path': None},
+        'elapsed_s': None, 'remaining_s': None, 'disk_warning_bytes': 10 * 1024 ** 3})
+    assert '已使能 · 保持位置' in html
+    assert '手柄遥操' in html and '未启用' in html
+    assert '原始关节反馈超限：J2=-2.494deg' in html
     assert 'id="session-pill" class="pill green"' not in html

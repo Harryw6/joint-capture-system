@@ -42,6 +42,7 @@ def test_gamepad_speeds_are_exposed_and_invalidated_when_status_expires(tmp_path
     state = make_state(tmp_path, monotonic=lambda: clock[0])
     message = json.dumps({'gamepad': {'connected': True},
                           'speed_factor': 0.5, 'movement_speed': 90,
+                          'motor_enabled': [True] * 6, 'feedback_error': 'bad zero',
                           'command_inhibited': True, 'teleop_error': 'reconnect', 'up_level_mode': 'pose'})
     state.sample_status('unitree', lambda: RemoteStatus(
         'unitree', True, 'recording', message, active=True))
@@ -51,11 +52,15 @@ def test_gamepad_speeds_are_exposed_and_invalidated_when_status_expires(tmp_path
     assert device['command_inhibited'] is True
     assert device['teleop_error'] == 'reconnect'
     assert device['teleop_mode'] == 'pose'
+    assert device['motor_enabled'] == [True] * 6
+    assert device['feedback_error'] == 'bad zero'
     clock[0] += 20
     device = state.snapshot()['hosts']['unitree']
     assert device['speed_factor'] is None
     assert device['movement_speed'] is None
     assert device['teleop_error'] is None
+    assert device['motor_enabled'] is None
+    assert device['feedback_error'] is None
 
 
 def test_stale_and_failed_status_does_not_claim_idle(tmp_path):

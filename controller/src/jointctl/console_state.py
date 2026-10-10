@@ -233,6 +233,8 @@ class ConsoleState:
                     item['gamepad'] = obj['gamepad']
                     item['arm_enabled'] = obj.get('arm_enabled')
                     item['arm_connected'] = obj.get('arm_connected')
+                    item['motor_enabled'] = obj.get('motor_enabled') if not status['stale'] else None
+                    item['feedback_error'] = obj.get('feedback_error') if not status['stale'] else None
                     item['command_inhibited'] = obj.get('command_inhibited') if not status['stale'] else None
                     item['teleop_error'] = obj.get('teleop_error') if not status['stale'] else None
                     item['teleop_mode'] = obj.get('up_level_mode') if not status['stale'] else None

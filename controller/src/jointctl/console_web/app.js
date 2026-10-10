@@ -87,10 +87,13 @@
     } else {
       const devices = resources.joysticks;
       row(target, '手柄识别', !stale && info?.gamepad ? info.gamepad.connected ? '已连接' : '未连接' : resources.stale === false && Array.isArray(devices) ? devices.length ? `系统已识别 ${devices.join(', ')}（待遥操确认）` : '未识别，请检查手柄 / 接收器' : '未知');
-      row(target, '机械臂使能', stale || info?.arm_enabled == null ? '未确认' : info.arm_enabled ? '已使能' : '未使能');
+      const motors = info?.motor_enabled;
+      row(target, '关节电机', stale || !Array.isArray(motors) || motors.length !== 6 ? '未确认' : motors.every(v => v === true) ? '已使能 · 保持位置' : motors.every(v => v === false) ? '已失能' : '部分使能 · 检查机械臂');
+      row(target, '手柄遥操', stale || info?.arm_enabled == null ? '未确认' : info.arm_enabled && !info.command_inhibited ? '已启用' : '未启用');
       row(target, '遥操模式', stale ? '未知' : info?.teleop_mode === 'pose' ? '末端坐标移动' : info?.teleop_mode === 'joint' ? '关节控制' : '未知');
       if (!stale && info?.command_inhibited) row(target, '遥操保护', '已禁止发送目标 · 重连后松开摇杆并按 Home 确认');
       if (!stale && info?.teleop_error) target.append(node('div', 'error-note', String(info.teleop_error)));
+      if (!stale && info?.feedback_error && info.feedback_error !== info.teleop_error) target.append(node('div', 'error-note', String(info.feedback_error)));
       row(target, '常驻设备', stale ? '未知' : info?.session_prepared ? '已初始化 · 可连续采集' : '需要初始化 / 检查设备');
       for (const [key, label] of [['front', '前置相机'], ['wrist', '腕部相机']]) {
         const camera = info?.camera_health?.[key];
