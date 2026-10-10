@@ -34,6 +34,8 @@ def safe_controller(base, joint_only=True):
             self._hat = (0, 0)
             self._arm_deadline = None
             self._last_enable = -math.inf
+            self._target_feedback = None
+            self._target_width = None
 
         def attach_safety(self, guard):
             self.guard = guard
@@ -123,6 +125,8 @@ def safe_controller(base, joint_only=True):
         def _seed_feedback(self, q, width):
             self.joint_angles = q.copy()
             self.gripper_state = width / self.gripper_max_width * 100.
+            self._target_feedback = q.copy()
+            self._target_width = width
             self._previous_direction[:] = 0
             self._previous_grip = 0.
 
@@ -215,9 +219,7 @@ def safe_controller(base, joint_only=True):
                         raise ValueError('遥操循环超时，请重新确认')
                     self.guard.last_tick = now
                 if self.arm_enabled and not self.command_inhibited:
-                    q, width = self._read_feedback(require_enabled=True)
-                    self._update_targets(q, width)
-                    self._joint_to_pose()
+                    self._read_feedback(require_enabled=True)
             except Exception as exc:
                 self.safety_stop(str(exc))
 
@@ -246,6 +248,21 @@ def safe_controller(base, joint_only=True):
                 target_width = float(np.clip(target_width, width - self.gripper_lead, width + self.gripper_lead))
             self.gripper_state = float(np.clip(target_width, 0, self.gripper_max_width)) / self.gripper_max_width * 100.
             self._previous_grip = grip
+            self._target_feedback = actual.copy()
+            self._target_width = width
+
+        def _validate_target(self, q, width):
+            target = np.asarray(self.joint_angles)
+            limits = np.asarray(self.joint_limits)
+            grip = self.gripper_state / 100. * self.gripper_max_width
+            if (q is None or width is None or target.shape != (6,)
+                    or not np.isfinite(target).all()
+                    or np.any(target < limits[:, 0]) or np.any(target > limits[:, 1])
+                    or np.any(np.abs(target - q) > self.joint_lead + 1e-8)
+                    or not math.isfinite(grip) or not 0 <= grip <= self.gripper_max_width
+                    or abs(grip - width) > self.gripper_lead + 1e-8):
+                raise ValueError('目标与实际位置偏差过大，已请求停止')
+            return target, grip
 
         def send_safe_command(self):
             if self.guard is None:
@@ -259,25 +276,14 @@ def safe_controller(base, joint_only=True):
                     self._sync_guard()
                     if self.command_inhibited or not self.arm_enabled or self._arm_deadline is not None:
                         return False
+                    # Verify the retained target against the sample that generated it.
+                    # Then integrate and validate against ONE new sample, under the
+                    # command lock. Comparing a saturated plan to a later CAN frame
+                    # falsely trips even on a 0.001-degree feedback change.
+                    self._validate_target(self._target_feedback, self._target_width)
                     q, width = self._read_feedback(require_enabled=True)
-                    target = np.asarray(self.joint_angles)
-                    limits = np.asarray(self.joint_limits)
-                    grip = self.gripper_state / 100. * self.gripper_max_width
-                    if target.shape == (6,) and np.isfinite(target).all():
-                        delta = np.abs(target - q)
-                        bad = np.flatnonzero(delta > self.joint_lead + 1e-8)
-                        if bad.size:
-                            detail = '; '.join(
-                                f'J{i+1}: target={math.degrees(target[i]):.3f}deg, '
-                                f'actual={math.degrees(q[i]):.3f}deg, '
-                                f'delta={math.degrees(delta[i]):.3f}deg' for i in bad)
-                            raise ValueError('目标与实际位置偏差过大，已请求停止；' + detail)
-                    if (target.shape != (6,) or not np.isfinite(target).all() or
-                            np.any(target < limits[:, 0]) or np.any(target > limits[:, 1]) or
-                            np.any(np.abs(target - q) > self.joint_lead + 1e-8) or
-                            not math.isfinite(grip) or not 0 <= grip <= self.gripper_max_width or
-                            abs(grip - width) > self.gripper_lead + 1e-8):
-                        raise ValueError('目标与实际位置偏差过大，已请求停止')
+                    self._update_targets(q, width)
+                    target, grip = self._validate_target(q, width)
                     self.guard.call('ModeCtrl', 0x01, 0x01, self.movement_speeds[self.movement_speed_index], 0x00)
                     self.guard.call('JointCtrl', *np.round(np.degrees(target) * 1000).astype(int).tolist())
                     self.guard.call('GripperCtrl', round(grip * 1e6), 3000, 0x01, 0)

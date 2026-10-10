@@ -200,6 +200,10 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 state = controller.get_state()
                 gamepad = input_snapshot(controller)
                 sent = send_command(piper, controller, state, gamepad_connected=gamepad["connected"])
+                if sent:
+                    controller._joint_to_pose()
+                # Targets now advance within the guarded send transaction.
+                state = controller.get_state()
                 controller._sync_guard()
                 monotonic_ns = time.monotonic_ns()
                 wall_time_ns = time.time_ns()

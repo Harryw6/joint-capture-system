@@ -134,6 +134,77 @@ def test_cartesian_control_cannot_be_enabled():
     with pytest.raises(ValueError, match='Cartesian'): safe_controller(object, joint_only=False)
 
 
+def test_new_feedback_between_planning_and_sending_does_not_latch_estop():
+    ctl = controller(Piper((1, 20, -30, 4, 5, 6), 35000))
+    ctl.interface.enabled = [True] * 6
+    ctl._connect_and_enable_arm(); ctl._finish_enable(ctl.guard.clock())
+    ctl._control_dt = .02; ctl._axes['left_x'] = -1.
+    q, width = ctl._read_feedback(True)
+    for _ in range(20): ctl._update_targets(q, width)
+    assert np.isclose(ctl.joint_angles[0], np.radians(3))
+    # A new CAN frame moves by only 0.001 degree in the opposite direction.
+    ctl.interface.joints.joint_state.joint_1 = 999
+    ctl.interface.calls.clear()
+    assert ctl.send_safe_command()
+    assert not ctl.command_inhibited and not ctl.guard.stop_requested
+    joint_call = next(call for call in ctl.interface.calls if call[0] == 'JointCtrl')
+    assert joint_call[1][0] <= 2999
+
+
+def test_gripper_feedback_change_at_lead_boundary_does_not_latch_estop():
+    ctl = controller(Piper((0, 20, -30, 0, 0, 0), 35000))
+    ctl.interface.enabled = [True] * 6
+    ctl._connect_and_enable_arm(); ctl._finish_enable(ctl.guard.clock())
+    ctl._control_dt = .02; ctl._axes['right_trigger'] = 1.
+    q, width = ctl._read_feedback(True)
+    for _ in range(20): ctl._update_targets(q, width)
+    ctl.interface.grip.gripper_state.grippers_angle = 34999
+    assert ctl.send_safe_command()
+    assert not ctl.guard.stop_requested
+    args = next(args for name, args, _ in reversed(ctl.interface.calls) if name == 'GripperCtrl')
+    assert args[0] <= 35999
+
+
+def test_drift_of_joint_without_stick_input_still_stops():
+    ctl = controller(Piper((0, 20, -30, 0, 0, 0), 35000))
+    ctl.interface.enabled = [True] * 6
+    ctl._connect_and_enable_arm(); ctl._finish_enable(ctl.guard.clock())
+    ctl.interface.joints.joint_state.joint_1 = 3000
+    ctl.interface.calls.clear()
+    assert not ctl.send_safe_command()
+    assert ctl.guard.stop_requested
+    assert [name for name, _, _ in ctl.interface.calls] == ['MotionCtrl_1']
+
+
+@pytest.mark.parametrize('axis,index,sign', [
+    ('left_x', 0, -1), ('left_y', 1, -1),
+    ('right_y', 2, 1), ('right_x', 5, 1),
+])
+def test_each_stick_sends_bounded_joint_commands(axis, index, sign):
+    ctl = controller(Piper((0, 20, -30, 0, 0, 0), 35000))
+    ctl.interface.enabled = [True] * 6
+    ctl._connect_and_enable_arm(); ctl._finish_enable(ctl.guard.clock())
+    ctl._control_dt = .005; ctl._axes[axis] = .5
+    for _ in range(200):
+        assert ctl.send_safe_command()
+        args = next(args for name, args, _ in reversed(ctl.interface.calls) if name == 'JointCtrl')
+        for i, value in enumerate(args, 1):
+            setattr(ctl.interface.joints.joint_state, 'joint_' + str(i), value)
+    assert sign * (args[index] - [0, 20000, -30000, 0, 0, 0][index]) > 1000
+    assert not ctl.guard.stop_requested
+
+
+@pytest.mark.parametrize('hat,index,sign', [((1, 0), 3, 1), ((0, 1), 4, -1)])
+def test_dpad_sends_wrist_joint_commands(hat, index, sign):
+    ctl = controller(Piper((0, 20, -30, 0, 0, 0), 35000))
+    ctl.interface.enabled = [True] * 6
+    ctl._connect_and_enable_arm(); ctl._finish_enable(ctl.guard.clock())
+    ctl._control_dt = .02; ctl._hat = hat
+    assert ctl.send_safe_command()
+    args = next(args for name, args, _ in reversed(ctl.interface.calls) if name == 'JointCtrl')
+    assert sign * args[index] > 0
+
+
 def test_unverified_calibration_blocks_home_even_if_feedback_moves_into_limits():
     ctl = controller(); ctl.calibration_fault = '零位校准尚未通过'
     with pytest.raises(ValueError, match='零位校准尚未通过'): ctl._connect_and_enable_arm()
