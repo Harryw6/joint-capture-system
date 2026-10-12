@@ -43,8 +43,8 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
 def load_controller(runtime: Path):
     sys.path.insert(0, str(runtime))
     from main import Teleop  # type: ignore
-    from safe_teleop import safe_controller
-    return safe_controller(Teleop)
+    # Keep the upstream controller unchanged; this adapter only records its state.
+    return Teleop
 
 
 def controller_paths(runtime: Path) -> tuple[Path, str, str]:
@@ -113,12 +113,14 @@ def send_command(piper, controller, state: dict[str, Any], *, gamepad_connected:
         joints = np.round(np.degrees(state["joints"][:6]) * 1000).astype(int).tolist()
         piper.ModeCtrl(0x01, 0x01, state["movement_speed"], state["command_mode"])
         piper.JointCtrl(*joints)
-    else:
+    elif state["low_level_mode"] == "pose":
         pose = state["xyz_rpy"].copy()
         pose[:3] = np.round(pose[:3] * 1_000_000)
         pose[3:] = np.round(pose[3:] * 1000)
         piper.ModeCtrl(0x01, 0x00, state["movement_speed"], state["command_mode"])
         piper.EndPoseCtrl(*pose.astype(int).tolist())
+    else:
+        return False
     gripper = int(controller.gripper_max_width * state["gripper"] * 10_000)
     piper.GripperCtrl(gripper, 3000, 0x01, 0)
     return True
@@ -152,8 +154,6 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
         start_sdk_gripper_limit=True,
     )
     controller = Controller(piper, str(urdf), None, root_name, target_link_name)
-    period = 1.0 / float(gamepad_config.get("control_hz", 200))
-    next_tick = time.monotonic()
     sequence = 0
     fields = [
         "monotonic_ns",
@@ -247,12 +247,8 @@ def run(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 atomic_json(snapshot_path, snapshot)
                 if sequence % 200 == 0:
                     csv_file.flush()
-                next_tick += period
-                delay = next_tick - time.monotonic()
-                if delay > 0:
-                    time.sleep(delay)
-                else:
-                    next_tick = time.monotonic()
+                # Upstream integrates once per update, then waits 5 ms.
+                pygame.time.wait(5)
     finally:
         pygame.quit()
     return 0

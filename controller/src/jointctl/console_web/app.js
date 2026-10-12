@@ -245,6 +245,200 @@
     }
     finally { submitting = false; if (lastState) render(lastState); }
   }
+  // Task markers describe segments inside a recording; they never submit capture actions.
+  let markerSnapshot = null;
+  let markerOnline = false;
+  let markerPolling = false;
+  let markerRefreshQueued = false;
+  let markerBusy = false;
+  let markerReadVersion = 0;
+  const expandedMarkerResets = new Set();
+  const markerLabels = {start: '任务开始', stop: '任务结束', reset: '重置本段开始'};
+  const markerTimezone = {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false};
+  function markerNs(value) {
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) return null;
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'bigint') return null;
+    if (typeof value === 'string' && !/^\d+$/.test(value)) return null;
+    try { const ns = BigInt(value); return ns >= 0n ? ns : null; } catch { return null; }
+  }
+  function markerTime(value) {
+    const ns = markerNs(value);
+    if (ns === null) return '尚无';
+    const ms = ns / 1000000n;
+    if (ms > 8640000000000000n) return '时间超出显示范围';
+    return new Date(Number(ms)).toLocaleString('zh-CN', markerTimezone);
+  }
+  function markerDuration(segment, live = false) {
+    const start = markerNs(segment?.start_desktop_ns);
+    const end = markerNs(segment?.end_desktop_ns);
+    let ns = markerNs(segment?.duration_ns);
+    if (ns === null && end !== null && start !== null) ns = end - start;
+    if (live && start !== null && end === null) ns = BigInt(Date.now()) * 1000000n - start;
+    if (ns === null || ns === undefined) return '--:--:--';
+    const seconds = (ns > 0n ? ns : 0n) / 1000000000n;
+    return [seconds / 3600n, seconds % 3600n / 60n, seconds % 60n].map(x => String(x).padStart(2, '0')).join(':');
+  }
+  function markerReview(segment) { return segment?.quality === 'review_required'; }
+  function markerClockInfo(sync) {
+    const estimates = []; const unavailable = [];
+    for (const [host, mapping] of Object.entries(sync?.clock || {})) {
+      const label = ({unitree:'Unitree', p450:'P450'})[host] || host;
+      const error = markerNs(mapping?.estimated_error_ns);
+      if (mapping?.state !== 'estimated' || error === null) { unavailable.push(label); continue; }
+      const hundredths = (error + 5000n) / 10000n;
+      estimates.push(`${label} ${hundredths / 100n}.${String(hundredths % 100n).padStart(2, '0')} ms`);
+    }
+    return {unavailable: unavailable.length > 0, text: [unavailable.length ? `时钟映射待补齐 · ${unavailable.join(' / ')}` : '', estimates.length ? `时钟映射估计误差 · ${estimates.join(' / ')}（估计值）` : ''].filter(Boolean).join('；')};
+  }
+  function markerSegments(snapshot) {
+    const segments = Array.isArray(snapshot?.segments) ? [...snapshot.segments] : [];
+    if (snapshot?.current && !segments.some(segment => segment.id === snapshot.current.id)) segments.push(snapshot.current);
+    return segments;
+  }
+  function renderMarkerHistory(snapshot) {
+    const segments = markerSegments(snapshot);
+    set('task-marker-count', `${segments.length} 段${segments.length > 10 ? ' · 显示最近 10 段' : ''}`);
+    const target = $('task-marker-history'); target.replaceChildren();
+    if (!segments.length) { target.append(node('p', 'muted', '尚无打点记录。')); return; }
+    const table = node('table', 'task-marker-table');
+    const head = node('thead'); const headings = node('tr');
+    ['段', '开始 · 北京时间', '结束 · 北京时间', '时长', '状态'].forEach(label => headings.append(node('th', '', label)));
+    head.append(headings); table.append(head);
+    const body = node('tbody'); table.append(body);
+    for (const segment of segments.slice(-10).reverse()) {
+      const current = segment.id === snapshot.current?.id;
+      const tr = node('tr', current ? 'task-marker-open' : '');
+      const number = node('td', '', `第 ${segment.index ?? '—'} 段`);
+      if (segment.reset_count) {
+        const resets = Array.isArray(segment.reset_history) ? segment.reset_history : [];
+        if (resets.length) {
+          const details = node('details', 'task-marker-resets');
+          details.open = expandedMarkerResets.has(segment.id);
+          details.append(node('summary', '', `重置 ${segment.reset_count} 次`));
+          details.addEventListener('toggle', () => {
+            if (details.isConnected) { if (details.open) expandedMarkerResets.add(segment.id); else expandedMarkerResets.delete(segment.id); }
+          });
+          for (const reset of resets) {
+            const item = node('div', 'mono');
+            item.append(node('span', '', `此前开始 ${markerTime(reset.start_desktop_ns)}`));
+            item.append(node('span', 'muted', `重置于 ${markerTime(reset.reset_desktop_ns)}`));
+            details.append(item);
+          }
+          number.append(details);
+        } else number.append(node('small', 'muted', `重置 ${segment.reset_count} 次`));
+      }
+      tr.append(number);
+      for (const value of [segment.start_desktop_ns, segment.end_desktop_ns]) {
+        const cell = node('td', 'mono', value == null && current ? '尚未结束' : markerTime(value));
+        if (value != null) cell.title = `${value} ns`;
+        tr.append(cell);
+      }
+      tr.append(node('td', 'mono', markerDuration(segment, current)));
+      tr.append(node('td', markerReview(segment) || current && snapshot.context?.healthy !== true ? 'task-marker-review' : '', `${current ? '当前' : '已结束'}${markerReview(segment) || current && snapshot.context?.healthy !== true ? ' · 待核对' : ''}`));
+      body.append(tr);
+    }
+    target.append(table);
+  }
+  function renderMarkers() {
+    const snapshot = markerSnapshot; const context = snapshot?.context; const current = snapshot?.current;
+    const healthy = context?.healthy === true && !snapshot?.error;
+    const journalUnavailable = snapshot?.error_type === 'journal_unavailable';
+    const available = markerOnline && !!context?.key && !journalUnavailable;
+    const mode = context?.mode === 'unitree' ? '仅 Unitree' : context?.mode === 'joint' ? '联合采集' : context?.mode || '当前采集';
+    set('task-marker-context', context ? `${mode} · ${context.episode_id || '采集 ID 未知'}` : snapshot?.error || snapshot?.reason || '当前范围尚无可用采集');
+    badge('task-marker-badge', !markerOnline ? snapshot ? '连接未确认' : '正在读取' : snapshot?.error ? journalUnavailable ? '日志无法读取' : '打点保存异常' : current ? healthy ? '本段进行中' : '本段待核对' : healthy ? '可开始下一段' : '等待采集', !markerOnline || snapshot?.error || current && !healthy ? 'amber' : healthy ? 'green' : 'neutral');
+    $('task-marker-start').disabled = markerBusy || !available || !healthy || !!current;
+    $('task-marker-stop').disabled = markerBusy || !available || !current;
+    $('task-marker-reset').disabled = markerBusy || !available || !healthy || !current;
+    $('task-marker-scope').disabled = markerBusy;
+    $('task-marker-stop').textContent = current && !healthy ? '任务结束 · 待核对' : '任务结束';
+    const latest = current || markerSegments(snapshot).slice(-1)[0];
+    set('task-marker-current', current ? `第 ${current.index ?? '—'} 段${current.reset_count ? ` · 重置 ${current.reset_count} 次` : ''}` : '尚无打开的段');
+    set('task-marker-duration', latest ? markerDuration(latest, !!current) : '--:--:--');
+    set('task-marker-start-time', latest ? markerTime(latest.start_desktop_ns) : '尚无');
+    set('task-marker-end-time', current ? '尚未结束' : latest ? markerTime(latest.end_desktop_ns) : '尚无');
+    $('task-marker-start-time').title = latest?.start_desktop_ns ? `${latest.start_desktop_ns} ns` : '';
+    $('task-marker-end-time').title = latest?.end_desktop_ns ? `${latest.end_desktop_ns} ns` : '';
+    const reason = snapshot?.error || context?.reason || snapshot?.reason;
+    const sync = snapshot?.sync;
+    const clockInfo = markerClockInfo(sync);
+    let hint = !markerOnline && snapshot ? '打点服务连接未确认，请等待重新读取。' : journalUnavailable ? `本机打点日志无法读取：${reason} 请检查保存路径后重新读取。` : snapshot?.error ? `时间已写入本机日志，但导出失败：${reason}${current ? ' 可结束当前段。' : ''}` : !healthy ? `${reason || '采集健康状态尚未确认。'}${current ? ' 可结束本段，时间段将标为待核对。' : ''}` : current ? '尝试失败时可重置本段开始；之前的开始点会保留为重置历史。' : '点击任务开始记录下一段；各段共用这条持续录制的采集。';
+    if (clockInfo.unavailable) hint += ' 时钟映射待补齐。';
+    set('task-marker-hint', hint);
+    const syncText = journalUnavailable ? '本机日志无法读取' : snapshot?.error_type === 'export_failed' ? '本机日志已保存 · 导出失败' : sync ? ({pending:'本机已保存 · 正在同步', synced:'本机已保存 · 已同步', failed:'本机已保存 · 同步失败'})[sync.state] || '保存状态待确认' : '保存状态尚未读取';
+    set('task-marker-sync', `${syncText}${sync?.error ? ' · ' + sync.error : ''}`);
+    $('task-marker-sync').className = sync?.state === 'failed' || snapshot?.error ? 'task-marker-review' : 'muted';
+    set('task-marker-clock', clockInfo.text);
+    $('task-marker-clock').hidden = !clockInfo.text;
+    $('task-marker-clock').className = clockInfo.unavailable ? 'task-marker-review' : 'muted';
+    set('task-marker-directory', snapshot?.local_directory || '尚无本机保存路径');
+    const directories = sync?.remote_directories;
+    $('task-marker-sync').title = directories ? typeof directories === 'string' ? directories : JSON.stringify(directories) : '';
+    renderMarkerHistory(snapshot);
+  }
+  async function pollMarkers(force = false) {
+    if (markerPolling || markerBusy) { if (force === true) markerRefreshQueued = true; return; }
+    markerRefreshQueued = false;
+    markerPolling = true;
+    const version = markerReadVersion; const scope = $('task-marker-scope').value;
+    try {
+      const {response, data} = await requestJson(`/api/task-markers?scope=${encodeURIComponent(scope)}`, {cache:'no-store'}, 4000);
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (version !== markerReadVersion) return;
+      const previousContext = markerSnapshot?.context?.key;
+      markerSnapshot = data; markerOnline = true;
+      if (previousContext && previousContext !== data.context?.key) set('task-marker-feedback', '当前采集已变化，已重新读取打点记录。');
+      renderMarkers();
+    } catch (error) {
+      if (version !== markerReadVersion) return;
+      markerOnline = false;
+      renderMarkers();
+      if (!markerSnapshot) set('task-marker-context', `无法读取打点：${error.message}`);
+    } finally {
+      markerPolling = false;
+      if (markerRefreshQueued && !markerBusy) { markerRefreshQueued = false; pollMarkers(); }
+    }
+  }
+  function markerRequestId() {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, character => {
+      const random = Math.floor(Math.random() * 16);
+      return (character === 'x' ? random : random & 3 | 8).toString(16);
+    });
+  }
+  async function submitMarker(action) {
+    if (markerBusy || $(`task-marker-${action}`).disabled || !markerSnapshot?.context?.key) return;
+    const payload = {action, scope: $('task-marker-scope').value, context_key: markerSnapshot.context.key, request_id: markerRequestId(), expected_revision: markerSnapshot.revision, client_wall_ms: Date.now()};
+    markerBusy = true; markerReadVersion += 1; renderMarkers();
+    set('task-marker-feedback', `正在记录${markerLabels[action]}…`);
+    let posted = false;
+    try {
+      if (!token) await session();
+      if (!token) throw new Error('无法获取本机操作令牌，请刷新页面。');
+      posted = true;
+      const {response, data} = await requestJson('/api/task-markers', {method:'POST', headers:{'Content-Type':'application/json', 'X-Console-Token':token}, body:JSON.stringify(payload)}, 8000);
+      posted = false;
+      if (response.status === 403) token = null;
+      if (!response.ok) {
+        if (response.status === 409) { markerOnline = false; set('task-marker-feedback', `${data.error || '当前采集或打点记录已变化。'} 正在重新读取，请核对后重试。`); }
+        else set('task-marker-feedback', `记录失败：${data.error || `HTTP ${response.status}`}`);
+        return;
+      }
+      markerSnapshot = data; markerOnline = true; renderMarkers();
+      set('task-marker-feedback', data.error ? data.error_type === 'export_failed' ? `时间已写入本机日志，但导出/同步失败：${data.error}` : `打点结果需要核对：${data.error}` : action === 'stop' ? '本段已结束，时间已记录。' : action === 'reset' ? '本段开始已重置，之前的开始点已保留。' : '本段开始时间已记录。');
+    } catch (error) {
+      if (posted) { markerOnline = false; set('task-marker-feedback', '请求结果未确认，正在重新读取记录。请核对后再操作，不会自动重发。'); }
+      else set('task-marker-feedback', `记录失败：${error.message}`);
+    } finally {
+      markerBusy = false; renderMarkers(); await pollMarkers(true);
+    }
+  }
+  for (const action of ['start', 'stop', 'reset']) $(`task-marker-${action}`).addEventListener('click', () => submitMarker(action));
+  $('task-marker-scope').addEventListener('change', () => {
+    markerReadVersion += 1; markerSnapshot = null; markerOnline = false;
+    expandedMarkerResets.clear();
+    set('task-marker-feedback', ''); renderMarkers(); pollMarkers(true);
+  });
   $('capture-form').addEventListener('submit', e => { e.preventDefault(); submit('start'); });
   try { $('instruction').value = localStorage.getItem('joint-instruction') || ''; } catch {}
   $('instruction').addEventListener('input', () => { try { localStorage.setItem('joint-instruction', $('instruction').value); } catch {} });
@@ -252,8 +446,9 @@
   document.addEventListener('click', async e => { const button = e.target.closest('button.copy'); if (!button || button.disabled) return; const value = button.dataset.copy ? $(button.dataset.copy).dataset.value : button.dataset.value; if (!value) return;
     try { await navigator.clipboard.writeText(value); button.textContent = '已复制'; } catch { button.textContent = '复制失败'; } setTimeout(() => { button.textContent = '复制'; }, 2000);
   });
-  window.addEventListener('offline', () => connection(false, '浏览器离线 · 状态未更新'));
-  window.addEventListener('online', poll);
+  window.addEventListener('offline', () => { connection(false, '浏览器离线 · 状态未更新'); markerOnline = false; renderMarkers(); });
+  window.addEventListener('online', () => { poll(); pollMarkers(); });
   window.JointConsole = {render};
   session(); poll(); setInterval(poll, 1000);
+  pollMarkers(); setInterval(pollMarkers, 2000);
 })();

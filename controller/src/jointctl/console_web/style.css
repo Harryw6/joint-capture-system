@@ -58,3 +58,26 @@ button:disabled{transform:none}.button.dark{background:#713d32;border-color:#713
 .preview-stage p {color:#c8d1db;text-align:center;padding:24px;}
 .preview-stage [hidden] {display:none;}
 @media(max-width:600px) {.preview-panel {padding:18px;}.preview-controls {gap:8px;}}
+
+/* Time markers share the capture desk, with a quieter, compact control row. */
+.task-markers{padding:14px 20px;border-left:3px solid var(--green)}
+.task-marker-heading{display:flex;align-items:center;justify-content:space-between;gap:12px 24px}
+.task-marker-heading h2{font-size:17px;letter-spacing:.01em}.task-marker-heading p{margin-top:3px;font-size:12px;overflow-wrap:anywhere}
+.task-marker-source{display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:none;font-size:12px;color:var(--muted)}
+.task-marker-source select{font:inherit;min-height:32px;padding:3px 24px 3px 8px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:2px}
+.task-marker-source select:focus-visible{outline:3px solid #be8d45;outline-offset:2px}
+.task-marker-desk{display:flex;align-items:center;gap:18px 28px;margin-top:12px}
+.task-marker-actions{display:flex;flex-wrap:wrap;gap:8px;flex:none}.task-marker-actions .button{min-width:0;min-height:35px;padding:0 13px;font-size:13px}
+.task-marker-current{display:grid;grid-template-columns:minmax(90px,.65fr) minmax(85px,.6fr) minmax(175px,1.2fr) minmax(175px,1.2fr);gap:8px 18px;flex:1;min-width:0}
+.task-marker-current>div{min-width:0}.task-marker-current strong{display:block;font-size:12px;font-weight:600;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;line-height:1.6}
+.task-marker-current .field-label{font-size:10px;letter-spacing:.03em}.task-markers .fineprint{margin-top:8px}.task-markers .action-feedback{margin-top:4px}
+.task-marker-details{margin-top:9px;padding-top:7px;font-size:12px}.task-marker-details summary{font-size:12px}.task-marker-details summary .muted{margin-left:9px;font-weight:400}
+.task-marker-history{overflow:auto;margin-top:9px}.task-marker-table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums}
+.task-marker-table th{font-weight:500;color:var(--muted);font-size:11px;padding:5px 10px;border-bottom:1px solid var(--line)}
+.task-marker-table td{padding:6px 10px;border-bottom:1px solid #e8e9e3}.task-marker-table th:first-child,.task-marker-table td:first-child{padding-left:0}
+.task-marker-table small{display:block;font-size:10px}.task-marker-open{background:var(--green-wash)}.task-marker-open td:first-child{padding-left:7px}
+.task-marker-resets{border:0;padding:0;margin-top:2px}.task-marker-resets summary{font-size:10px;color:var(--muted);font-weight:400}.task-marker-resets>div{font-size:11px;margin-top:6px}.task-marker-resets span{display:block}
+.task-marker-review{color:var(--amber)}.task-marker-storage{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:9px;color:var(--muted);font-size:11px}
+.task-marker-storage code{overflow-wrap:anywhere;min-width:0;font-family:Consolas,"Courier New",monospace}
+@media(max-width:1250px){.task-marker-desk{align-items:flex-start;flex-direction:column;gap:12px}.task-marker-current{width:100%;grid-template-columns:.7fr .7fr 1.3fr 1.3fr}}
+@media(max-width:650px){.task-markers{padding:12px 14px}.task-marker-heading{align-items:flex-start;flex-direction:column;gap:8px}.task-marker-heading h2{font-size:16px}.task-marker-source{flex-wrap:wrap;gap:6px}.task-marker-desk{margin-top:10px;gap:10px}.task-marker-actions{width:100%;gap:6px}.task-marker-actions .button{flex:1;padding:5px 7px;font-size:12px}.task-marker-current{grid-template-columns:1fr 1fr;gap:8px 12px}.task-marker-current strong{font-size:11px}}

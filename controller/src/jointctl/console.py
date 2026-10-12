@@ -10,6 +10,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
 from .console_state import ConsoleState
@@ -71,6 +72,16 @@ def make_server(state, port=8766):
                 return self._reply(200, {'token': token})
             if self.path == '/api/preview':
                 return self._reply(200, preview)
+            if urlsplit(self.path).path == '/api/task-markers':
+                try:
+                    query = parse_qs(urlsplit(self.path).query)
+                    if set(query)-{'scope'} or len(query.get('scope', ['auto'])) != 1:
+                        raise ValueError('打点范围无效')
+                    return self._reply(200, state.marker_snapshot(query.get('scope', ['auto'])[0]))
+                except ValueError as exc:
+                    return self._reply(400, {'error': str(exc)})
+                except Exception as exc:
+                    return self._reply(500, {'error': f'读取任务打点失败：{exc}'})
             if self.path == '/api/state':
                 try:
                     return self._reply(200, state.snapshot())
@@ -90,9 +101,11 @@ def make_server(state, port=8766):
             return self._reply(200, content, mime)
 
         def do_POST(self):
+            received_wall_ns = time.time_ns()
+            received_monotonic_ns = time.perf_counter_ns()
             if not self._trusted(mutation=True):
                 return self._reply(403, {'error': '操作来源或令牌无效，请刷新本机页面'})
-            if self.path != '/api/actions':
+            if self.path not in {'/api/actions', '/api/task-markers'}:
                 return self._reply(404, {'error': 'not found'})
             if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
                 return self._reply(415, {'error': '需要 JSON 请求'})
@@ -114,6 +127,9 @@ def make_server(state, port=8766):
                 return self._reply(413, {'error': '请求过大'})
             try:
                 payload = json.loads(self.rfile.read(length))
+                if self.path == '/api/task-markers':
+                    return self._reply(200, state.mark_task(payload,
+                        wall_ns=received_wall_ns, monotonic_ns=received_monotonic_ns))
                 if not isinstance(payload, dict) or set(payload) != {'action','payload'}:
                     raise ValueError('操作格式无效')
                 result = state.submit(payload['action'], payload['payload'])

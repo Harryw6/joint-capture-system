@@ -9,6 +9,7 @@ def safe_controller(base, joint_only=True):
     class ContinuousTeleop(base):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
+            self.deadzone = .2
             self.speed_factors = [.25, .5, 1.]
             self.speed_factor_index = 1
             self.movement_speeds = [10, 20, 30]

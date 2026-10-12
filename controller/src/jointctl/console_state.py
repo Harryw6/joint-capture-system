@@ -17,6 +17,7 @@ from .operation_lock import operation_busy
 from .postprocess import pending_episodes
 from .remote import json_objects
 from .telemetry import read_resources, safe_json
+from .task_marker_service import TaskMarkerService, capture_context, recording_directory
 
 
 def read_json(path):
@@ -54,6 +55,9 @@ class ConsoleState:
         self.quit = threading.Event()
         self.threads = []
         self.worker = None
+        self.task_markers = TaskMarkerService(self.root,
+            {host: remote.host for host, remote in self.controller.remotes.items()},
+            self._task_marker_context)
         self.progress = {}
         self._fault_stops = set()
         self.cache = {h: {k: {'value': None, 'success_at': None, 'success_mono': None,
@@ -158,6 +162,7 @@ class ConsoleState:
 
     def close(self):
         self.quit.set()
+        self.task_markers.close()
         for thread in self.threads:
             thread.join(timeout=4)
         if self.worker:
@@ -219,6 +224,10 @@ class ConsoleState:
                                      and status.get('progress_unchanged_s', 0) >= 15)
             item['path'] = (episode or {}).get('remote_directories', {}).get(host)
             item['path_is_current'] = active
+            observed_directory = recording_directory(host, {**status, 'message': raw_message})
+            if not status['stale'] and observed_directory:
+                item['path'] = observed_directory
+                item['path_is_current'] = status.get('active') is True
             item['frames_dropped'] = None
             item['save_errors'] = None
             for obj in json_objects(raw_message):
@@ -349,6 +358,18 @@ class ConsoleState:
             return None
         return {k: episode.get(k) for k in ('episode_id','label','mode','state','created_desktop_ns',
                 't0_desktop_ns','t1_desktop_ns','remote_directories','diagnostics','clock_monitor_closed_cleanly','metadata')}
+
+    def _task_marker_context(self, scope, previous):
+        with self.lock:
+            records = {host: copy.deepcopy(value['status']) for host, value in self.cache.items()}
+        _, episode = self._episode()
+        return capture_context(records, episode, scope, previous, now=self.monotonic())
+
+    def marker_snapshot(self, scope='auto'):
+        return self.task_markers.snapshot(scope)
+
+    def mark_task(self, payload, *, wall_ns, monotonic_ns):
+        return self.task_markers.apply(payload, wall_ns=wall_ns, monotonic_ns=monotonic_ns)
 
     def submit(self, action, payload, *, expected_episode=None):
         if action not in {'start','stop','recover','align','prepare','finalize'} or not isinstance(payload, dict):
