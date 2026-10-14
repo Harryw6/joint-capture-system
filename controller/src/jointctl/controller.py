@@ -16,6 +16,7 @@ from typing import Callable, Mapping
 from .alignment import build_clock_timeline
 from .clock_sync import ClockProbe, launch_detached_monitor, read_clock_records, DEFAULT_CLOCK_FRESHNESS_NS
 from .manifest import ManifestStore, ActiveEpisodeConflict
+from .metadata_storage import MetadataStorage, MetadataStorageError
 from .models import (
     ClockEstimate,
     ClockSample,
@@ -140,6 +141,7 @@ class JointController:
         clock_freshness_ns: int = DEFAULT_CLOCK_FRESHNESS_NS,
         alignment_window_ns: int = 5_000_000_000,
         progress: Callable[[str], None] | None = None,
+        metadata_storage: MetadataStorage | None = None,
     ) -> None:
         if readiness_timeout_s <= 0:
             raise ValueError("readiness_timeout_s must be positive")
@@ -169,6 +171,13 @@ class JointController:
         self.clock_freshness_ns = clock_freshness_ns
         self.alignment_window_ns = alignment_window_ns
         self.progress = progress or (lambda _message: None)
+        self.metadata_storage = metadata_storage
+        if metadata_storage is not None:
+            self.monitor_stop_timeout_s = max(monitor_stop_timeout_s, metadata_storage.timeout_s + 2)
+
+    def sync_metadata(self, episode_id: str, *, final: bool = False) -> None:
+        if self.metadata_storage is not None:
+            self.metadata_storage.sync(self.store.episode_dir(episode_id), final=final)
 
     def start(self, instruction: str, task: str) -> EpisodeManifest:
         existing = self.store.active()
@@ -209,7 +218,10 @@ class JointController:
             label=instruction,
             mode=task,
             created_desktop_ns=self.time_ns(),
-            metadata={'starter_pid': os.getpid()},
+            metadata={'starter_pid': os.getpid(), **({'metadata_storage': {
+                **self.metadata_storage.settings(),
+                'path': self.metadata_storage.remote_path(episode_id),
+            }} if self.metadata_storage else {})},
         )
         self.store.create(manifest)
 
@@ -217,6 +229,8 @@ class JointController:
         remote_directories: dict[str, str] = {}
         diagnostics: list[DiagnosticRecord] = []
         try:
+            # Confirm durable metadata storage before starting either recorder.
+            self.sync_metadata(episode_id)
             monitor_pid = self._launch_monitor(episode_id)
             self.store.update(episode_id, clock_monitor_pid=monitor_pid)
 
@@ -271,13 +285,14 @@ class JointController:
             rollback_statuses, rollback_results, rollback_diagnostics = self._rollback(
                 episode_id
             )
+            monitor_closed = self._stop_monitor(self.store.load(episode_id))
             diagnostics.extend(rollback_diagnostics)
             cleanup_complete = all(
                 (host in rollback_results and rollback_results[host].ok)
                 or (status.reachable and not status.last_error and not status.active
                     and status.episode_id is None)
                 for host, status in rollback_statuses.items()
-            ) and len(rollback_statuses) == len(self.remotes)
+            ) and len(rollback_statuses) == len(self.remotes) and monitor_closed
             if not cleanup_complete:
                 self.progress('清理尚未确认：保留本次会话。恢复连接后请点击停止并校验，勿重复开始。')
             self.store.update(
@@ -289,6 +304,11 @@ class JointController:
                 rollback_results=rollback_results,
                 diagnostics=diagnostics,
             )
+            try:
+                if monitor_closed:
+                    self.sync_metadata(episode_id)
+            except MetadataStorageError as storage_error:
+                self.progress(f'启动失败记录尚未保存到机器狗，本地缓存保留：{storage_error}')
             kind = getattr(exc, "failure_kind", "remote_command")
             raise JointStartFailed(str(exc), episode_id, failure_kind=kind) from exc
 
@@ -306,6 +326,10 @@ class JointController:
             if mismatched:
                 message = "remote ownership does not exactly match the active manifest"
             estimates, health, reasons = self._clock_health(manifest)
+            if self.metadata_storage is not None:
+                reason = self.metadata_storage.health_reason(self.store.episode_dir(manifest.episode_id), self.time_ns())
+                if reason:
+                    reasons.append(reason)
             reported_state = manifest.state
             starter_pid = manifest.metadata.get('starter_pid')
             if (manifest.state == EpisodeState.STARTING and isinstance(starter_pid, int)
@@ -462,7 +486,7 @@ class JointController:
             final_state = EpisodeState.STOP_FAILED
         else:
             final_state = EpisodeState.PARTIAL
-        return self.store.update(
+        result = self.store.update(
             manifest.episode_id,
             state=final_state,
             metadata={**manifest.metadata, **({'raw_capture': raw_capture} if raw_capture else {}),
@@ -471,6 +495,12 @@ class JointController:
             clock_monitor_closed_cleanly=monitor_closed,
             diagnostics=diagnostics,
         )
+        if monitor_closed:
+            # No publisher is left that could overwrite the terminal manifest.
+            self.sync_metadata(manifest.episode_id, final=True)
+        elif self.metadata_storage is not None:
+            raise MetadataStorageError('对时监测尚未退出；两端停止结果已保存，本地对时缓存保留，退出后请补传')
+        return result
 
     def recover(self) -> EpisodeManifest:
         existing = self.store.active()
@@ -667,6 +697,8 @@ class JointController:
             "ssh_timeout_s": self.ssh_timeout_s,
             "clock_stop_file": "clock.stop",
         }
+        if self.metadata_storage is not None:
+            payload['metadata_storage'] = self.metadata_storage.settings()
         with temporary.open("w", encoding="utf-8", newline="\n") as handle:
             json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
             handle.write("\n")

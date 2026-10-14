@@ -22,6 +22,7 @@ from .controller import (
 )
 from .inspectors import InspectorConnectionError, InspectorError, P450Inspector, StreamSummary, UnitreeInspector
 from .manifest import ManifestStore, ActiveEpisodeConflict
+from .metadata_storage import MetadataStorage, MetadataStorageError
 from .models import ClockSample, EpisodeManifest, EpisodeState, JointStatusReport
 from .remote import RemoteClient
 from .operation_lock import operation_lock, OperationBusy
@@ -81,6 +82,7 @@ def make_controller(args: argparse.Namespace) -> JointController:
         clock_freshness_ns=int(config.get("clock_freshness_ns", DEFAULT_CLOCK_FRESHNESS_NS)),
         alignment_window_ns=int(config.get("alignment_window_ns", 5_000_000_000)),
         progress=lambda message: print(message, file=sys.stderr, flush=True),
+        metadata_storage=MetadataStorage.from_config(config),
     )
 
 
@@ -595,6 +597,9 @@ def _parser() -> argparse.ArgumentParser:
     align.add_argument("--no-remote-inspect", action="store_true")
     finalize = commands.add_parser("finalize", help="validate the oldest stopped episode; never export video")
     finalize.add_argument("episode_id", nargs="?")
+    for name in ('sync-metadata', 'fetch-metadata'):
+        command = commands.add_parser(name, help='save/fetch stopped-episode metadata on/from Unitree')
+        command.add_argument('episode_id')
     return parser
 
 
@@ -622,6 +627,31 @@ def _run_alignment_for_finalization(args: argparse.Namespace, episode: EpisodeMa
 
 
 def _run(args: argparse.Namespace) -> int:
+    if args.command in {'sync-metadata', 'fetch-metadata'}:
+        config = _load_config(Path(args.config))
+        storage = MetadataStorage.from_config(config)
+        if storage is None:
+            raise ValueError('metadata_storage is not configured')
+        storage.remote_path(args.episode_id)  # Validate before constructing a local path.
+        store = ManifestStore(_manifest_root(args, config))
+        if store.active() is not None:
+            raise ActiveEpisodeConflict('stop the active capture before metadata transfer')
+        folder = store.episode_dir(args.episode_id)
+        if args.command == 'fetch-metadata':
+            storage.fetch(folder)
+        else:
+            manifest = store.load(args.episode_id)
+            if manifest.state.value not in {'complete','start_failed','partial','stop_failed'}:
+                raise ActiveEpisodeConflict('stop the capture before metadata transfer')
+            if (manifest.clock_monitor_closed_cleanly is not True and
+                    manifest.clock_monitor_pid is not None):
+                from .controller import _process_is_running
+                if _process_is_running(manifest.clock_monitor_pid):
+                    raise ActiveEpisodeConflict('wait for the clock monitor to exit before metadata transfer')
+            storage.sync(folder, final=True)
+        _emit({'episode_id':args.episode_id,'unitree_path':storage.remote_path(args.episode_id),
+               'local_cache':str(folder),'saved':True})
+        return EXIT_OK
     if args.command == 'finalize':
         config = _load_config(Path(args.config))
         store = ManifestStore(_manifest_root(args, config))
@@ -637,6 +667,9 @@ def _run(args: argparse.Namespace) -> int:
             print(f'后处理失败，原始数据已保留，可稍后重试：{exc}', file=sys.stderr, flush=True)
             return EXIT_REMOTE_COMMAND
         _emit(completed.to_dict())
+        sync = getattr(controller, 'sync_metadata', None)
+        if sync is not None:
+            sync(completed.episode_id, final=True)
         print(f'后处理验收通过：{completed.episode_id}', file=sys.stderr, flush=True)
         return EXIT_OK
     if args.command == 'prepare':
@@ -753,7 +786,8 @@ def _run(args: argparse.Namespace) -> int:
         destinations = {kind: str(config.get(kind, {}).get("host", kind)) for kind in hosts}
         interval = float(config.get("clock_interval_s", 0.2))
         return run_monitor(Path(episode), hosts, interval, Path(episode) / "clock.stop",
-                           destinations=destinations, timeout_s=float(config.get("ssh_timeout_s", 10.0)))
+                           destinations=destinations, timeout_s=float(config.get("ssh_timeout_s", 10.0)),
+                           metadata_storage=MetadataStorage.from_config(config))
     if args.command == "align":
         config = _load_config(Path(args.config)); root = _manifest_root(args, config)
         store = ManifestStore(root)
@@ -787,6 +821,13 @@ def _run(args: argparse.Namespace) -> int:
                 return EXIT_TIMING
             raise
         report = json.loads(output.read_text(encoding="utf-8")); _emit(report)
+        saved_manifest = EpisodeManifest.from_dict(json.loads((Path(episode) / 'manifest.json').read_text(encoding='utf-8')))
+        if not args.no_remote_inspect and saved_manifest.metadata.get('metadata_storage'):
+            storage = MetadataStorage.from_config(config)
+            if storage is not None:
+                # Alignment during capture must not race the monitor's writer.
+                if saved_manifest.state == EpisodeState.COMPLETE and saved_manifest.clock_monitor_closed_cleanly:
+                    storage.sync(Path(episode), final=True)
         return EXIT_TIMING if report["quality"].get("degraded") else EXIT_OK
     raise ValueError(f"unknown command: {args.command}")
 
@@ -795,7 +836,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         try:
-            if args.command in {'start', 'stop', 'recover', 'align', 'prepare', 'finalize'}:
+            if args.command in {'start', 'stop', 'recover', 'align', 'prepare', 'finalize', 'sync-metadata', 'fetch-metadata'}:
                 config = _load_config(Path(args.config))
                 with operation_lock(_manifest_root(args, config)):
                     return _run(args)
@@ -823,6 +864,10 @@ def main(argv: list[str] | None = None) -> int:
             code = (EXIT_CONNECTIVITY if exc.failure_kind == "connectivity"
                     else EXIT_REMOTE_COMMAND)
             print(f"clock probe failed: {exc}", file=sys.stderr); return code
+        except MetadataStorageError as exc:
+            code = EXIT_CONNECTIVITY if exc.failure_kind == 'connectivity' else EXIT_REMOTE_COMMAND
+            print(f'对时文件尚未保存/取回，本地缓存保留：{exc}', file=sys.stderr, flush=True)
+            return code
         except (ConnectionError, TimeoutError) as exc:
             print(f"connectivity failure: {exc}", file=sys.stderr); return EXIT_CONNECTIVITY
         except (OSError, ValueError, TypeError, KeyError) as exc:

@@ -1,5 +1,10 @@
 {
   "manifest_root": "episodes",
+  "metadata_storage": {
+    "root": "/home/unitree/heterovla-data/joint_manifests",
+    "interval_s": 2.0,
+    "timeout_s": 5.0
+  },
   "p450": {"host": "p450", "kind": "p450", "preview": {
     "url": "ws://192.168.1.11:9090",
     "topic": "/uav1/camera/color/image_raw/compressed",

@@ -50,7 +50,7 @@ Unitree 已部署 root 所有的 `/usr/local/sbin/joint-can0-prepare`、`/etc/sy
 
 ### 备用命令入口
 
-四个批处理入口可从任意当前目录运行。它们使用安装目录的绝对配置路径，并固定把 manifest 写入 `D:\OneDriveData\Desktop\joint_manifests`，不会落到当前目录的 `episodes`。
+四个批处理入口可从任意当前目录运行。它们使用安装目录的绝对配置路径；本地工作缓存由 `JointCapture\manifest_root.txt` 指定，新安装默认是 `D:\JointCaptureData\manifests`，不会落到当前目录的 `episodes`。正式对时记录保存到机器狗主机，见下文。
 
 ```powershell
 D:\OneDriveData\Desktop\JointStart.bat
@@ -78,13 +78,32 @@ $env:PYTHONPATH = "$app\src;$env:PYTHONPATH"
 
 ## Manifest 与有效区间
 
-每个 episode 位于：
+新配置启用 `metadata_storage`，每个 episode 的正式记录位于机器狗：
 
 ```text
-D:\OneDriveData\Desktop\joint_manifests\<episode_id>\
+/home/unitree/heterovla-data/joint_manifests/<episode_id>/
 ```
 
 `manifest.json` 保存 start/status/stop 的 stdout、stderr、退出码、远端原始目录、`T0`、`T1`、状态和诊断。`clock_p450.jsonl` 与 `clock_unitree.jsonl` 是持续时钟探测的原始样本，只追加、不重写。`alignment.json` 是可重复生成的派生报告。
+
+启动前先确认机器狗目录可写，失败时不启动两端录制。采集期间独立线程每 2 秒通过 SSH 把新增完整时钟行保存到机器狗，同时更新 manifest、monitor 配置及已有的 `raw_health.json`、`alignment.json`。机器狗落盘后返回字节位置和 SHA-256；重复补传核对已有内容，不会重复追加或覆盖不一致的时钟证据。停止时先停止两端采集并等待对时监控退出，再保存终态 manifest 并完整核对两路时钟文件；“处理待办”生成的报告也会保存到机器狗。
+
+对时仍由启动采集的电脑测量，四时间戳及共同电脑时间轴保持原有含义。保存线程不会阻塞探测线程。本地 `--manifest-root` 是工作/重试缓存，原有本地路径与历史记录继续可读；机器狗断线或磁盘写入失败时保留缓存、持续重试，并在网页对时状态和 CLI 提示保存尚未确认。突然断电可能丢失最后一次确认之后尚未传到机器狗的记录，因此停止后的成功确认仍然必要。
+
+配置位于 `config/default.json`：`metadata_storage.root` 指定机器狗上的绝对路径，`interval_s` 指定保存间隔，`timeout_s` 指定单次 SSH 保存时限。SSH 目标自动使用 `unitree.host` 的地址/别名，文件中的逻辑设备名仍是 `p450` 和 `unitree`。旧安装的自定义配置需添加该配置块后重启后台；缺少该块的旧配置保留原先的本地保存行为。更新代码不会追溯生成缺失的历史时钟样本。
+
+备份机器狗数据时，应同时保存 `/home/unitree/heterovla-data/datasets` 和 `/home/unitree/heterovla-data/joint_manifests`，并按完整会话 ID 配对。
+
+停止后的保存失败可以重试；换电脑后可从机器狗取回已停止的会话记录：
+
+```powershell
+# $app、$python 与上面的入口示例相同；读取本地缓存路径。
+$cache = (Get-Content -LiteralPath "$app\manifest_root.txt" -Raw).Trim()
+& $python -m jointctl --config "$app\config\default.json" --manifest-root $cache sync-metadata <episode_id>
+& $python -m jointctl --config "$app\config\default.json" --manifest-root $cache fetch-metadata <episode_id>
+```
+
+取回会验证摘要和会话 ID，不覆盖内容不同的本地记录，也不会建立活动采集指针。补传/取回要求当前本地没有活动采集；补传还会拒绝尚未退出的本地对时监控。取回后可继续使用 `align` 和原有离线视频导出流程。
 
 共同有效区间严格定义为 `[T0,T1)`，即包含 `T0`，不包含 `T1`。两端进程可以更早启动、更晚退出；区间外的数据是保留的首尾冗余，不会被本工具删除。
 

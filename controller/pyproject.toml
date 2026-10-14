@@ -17,4 +17,4 @@ where = ["src"]
 jointctl = ["console_web/*.html", "console_web/*.css", "console_web/*.js"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]

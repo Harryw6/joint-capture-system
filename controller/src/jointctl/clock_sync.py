@@ -15,6 +15,7 @@ import time
 from typing import Callable, Mapping
 
 from .models import ClockSample, EpisodeManifest
+from .metadata_storage import MetadataStorage
 
 
 REMOTE_RESPONDER = """import sys,time
@@ -262,7 +263,7 @@ def _append_line(path: Path, row: dict[str, object]) -> None:
 
 def _run_monitor(manifest_dir: Path, hosts: tuple[str, ...], interval_s: float,
                  stop_file: Path, probe_factory: Callable[[str], ClockProbe],
-                 sample_count: int | None = None) -> int:
+                 sample_count: int | None = None, *, metadata_storage: MetadataStorage | None = None) -> int:
     manifest_dir.mkdir(parents=True, exist_ok=True)
     # Avoid even opening SSH processes after an episode has already finished.
     if stop_file.exists() or _terminal_manifest_present(manifest_dir):
@@ -300,7 +301,11 @@ def _run_monitor(manifest_dir: Path, hosts: tuple[str, ...], interval_s: float,
             next_at = max(next_at + max(0.0, interval_s), time.monotonic())
 
     threads = [threading.Thread(target=worker, args=(host,), daemon=True) for host in hosts]
+    publisher = (threading.Thread(target=metadata_storage.run, args=(manifest_dir, stop_event), daemon=True)
+                 if metadata_storage is not None else None)
     try:
+        if publisher is not None:
+            publisher.start()
         for thread in threads:
             thread.start()
         while any(thread.is_alive() for thread in threads):
@@ -310,6 +315,9 @@ def _run_monitor(manifest_dir: Path, hosts: tuple[str, ...], interval_s: float,
         for thread in threads:
             thread.join()
     finally:
+        stop_event.set()
+        if publisher is not None:
+            publisher.join()
         for probe in probes.values():
             probe.close()
     return 0
@@ -317,10 +325,11 @@ def _run_monitor(manifest_dir: Path, hosts: tuple[str, ...], interval_s: float,
 
 def run_monitor(manifest_dir: Path, hosts: tuple[str, ...], interval_s: float,
                 stop_file: Path, *, destinations: Mapping[str, str] | None = None,
-                timeout_s: float = 2.0) -> int:
+                timeout_s: float = 2.0, metadata_storage: MetadataStorage | None = None) -> int:
     return _run_monitor(manifest_dir, hosts, interval_s, stop_file,
                         lambda host: ClockProbe(host, timeout_s=timeout_s,
-                                                destination=(destinations or {}).get(host, host)))
+                                                destination=(destinations or {}).get(host, host)),
+                        metadata_storage=metadata_storage)
 
 
 def run_monitor_for_test(manifest_dir: Path, stop_file: Path, sample_count: int,
@@ -396,10 +405,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text(encoding="utf-8"))
     hosts = tuple(config.get("hosts", ("p450", "unitree")))
+    settings = config.get('metadata_storage')
+    storage = MetadataStorage(**settings) if settings is not None else None
     return run_monitor(args.manifest_dir, hosts, float(config.get("clock_interval_s", 0.2)),
                        args.manifest_dir / config.get("clock_stop_file", "clock.stop"),
                        destinations=config.get("destinations"),
-                       timeout_s=float(config.get("ssh_timeout_s", 2.0)))
+                       timeout_s=float(config.get("ssh_timeout_s", 2.0)), metadata_storage=storage)
 
 
 if __name__ == "__main__":

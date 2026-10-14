@@ -321,6 +321,11 @@ class ConsoleState:
                 try:
                     manifest = self.store.load(episode['episode_id'])
                     estimates, health, reasons = self.controller._clock_health(manifest)
+                    storage = getattr(self.controller, 'metadata_storage', None)
+                    if storage is not None:
+                        reason = storage.health_reason(self.store.episode_dir(manifest.episode_id), time.time_ns())
+                        if reason:
+                            reasons.append(reason)
                     clock = {'degraded': bool(reasons), 'reasons': reasons, 'health': health,
                              'estimated_error_ms': sum(e.estimated_error_ns for e in estimates)/1e6 if len(estimates)==2 else None}
                 except Exception as exc:
